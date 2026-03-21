@@ -1,5 +1,7 @@
 import { useState, useEffect } from 'react'
 import { supabase } from '../lib/supabase'
+import { ThemeToggle } from '../lib/theme.jsx'
+import ChangePasswordModal from '../components/ChangePasswordModal.jsx'
 import { format, parseISO, differenceInCalendarDays } from 'date-fns'
 
 const REGIMEN_LABELS = {
@@ -38,6 +40,7 @@ export default function PatientDashboard() {
   const [success, setSuccess] = useState('')
   const [error, setError] = useState('')
   const [activeTab, setActiveTab] = useState('log')
+  const [showChangePassword, setShowChangePassword] = useState(false)
 
   const today = format(new Date(), 'yyyy-MM-dd')
   const [form, setForm] = useState({
@@ -106,6 +109,7 @@ export default function PatientDashboard() {
 
   return (
     <div className="page">
+      {showChangePassword && <ChangePasswordModal onClose={() => setShowChangePassword(false)} />}
       <div style={{ background: 'var(--surface)', borderBottom: '1px solid var(--border)', padding: '16px 0' }}>
         <div className="container" style={{ display: 'flex', alignItems: 'center', justifyContent: 'space-between' }}>
           <div style={{ display: 'flex', alignItems: 'center', gap: '10px' }}>
@@ -118,6 +122,8 @@ export default function PatientDashboard() {
           </div>
           <div style={{ display: 'flex', alignItems: 'center', gap: '16px' }}>
             <span style={{ fontSize: '14px', color: 'var(--text-muted)' }}>{profile?.full_name}</span>
+            <ThemeToggle />
+            <button className="btn btn-secondary btn-sm" onClick={() => setShowChangePassword(true)}>🔒 Password</button>
             <button className="btn btn-secondary btn-sm" onClick={handleSignOut}>Sign Out</button>
           </div>
         </div>

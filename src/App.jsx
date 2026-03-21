@@ -6,6 +6,7 @@ import PatientRegister from './pages/PatientRegister'
 import PatientDashboard from './pages/PatientDashboard'
 import DoctorDashboard from './pages/DoctorDashboard'
 import PatientDetail from './pages/PatientDetail'
+import ResetPassword from './pages/ResetPassword'
 
 export default function App() {
   const [session, setSession] = useState(undefined)
@@ -25,20 +26,20 @@ export default function App() {
   }, [])
 
   async function fetchRole(userId) {
-    const { data } = await supabase
-      .from('profiles')
-      .select('role')
-      .eq('id', userId)
-      .single()
+    const { data } = await supabase.from('profiles').select('role').eq('id', userId).single()
     setRole(data?.role || null)
   }
 
   if (session === undefined) {
+    return <div className="loading-screen"><div className="spinner" /></div>
+  }
+
+  // Always allow reset-password route regardless of auth state
+  if (window.location.pathname === '/reset-password') {
     return (
-      <div className="loading-screen">
-        <div className="spinner" />
-        <span>Loading GlucoTrack…</span>
-      </div>
+      <Routes>
+        <Route path="/reset-password" element={<ResetPassword />} />
+      </Routes>
     )
   }
 
@@ -47,18 +48,14 @@ export default function App() {
       <Routes>
         <Route path="/login" element={<LoginPage />} />
         <Route path="/register" element={<PatientRegister />} />
+        <Route path="/reset-password" element={<ResetPassword />} />
         <Route path="*" element={<Navigate to="/login" />} />
       </Routes>
     )
   }
 
   if (!role) {
-    return (
-      <div className="loading-screen">
-        <div className="spinner" />
-        <span>Setting up your account…</span>
-      </div>
-    )
+    return <div className="loading-screen"><div className="spinner" /><span>Setting up your account…</span></div>
   }
 
   return (
