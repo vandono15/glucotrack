@@ -96,6 +96,142 @@ export default function DoctorDashboard() {
     setExportingAll(false)
   }
 
+  function exportResearchCSV() {
+    const patientMap = {}
+    // Assign anonymous numeric IDs
+    patients.forEach((p, i) => { patientMap[p.id] = { ...p, anonId: `PT${String(i + 1).padStart(3, '0')}` } })
+
+    const headers = [
+      'Patient ID', 'Age at Reading', 'Sex', 'Weight (kg)',
+      'Diabetes Duration (yrs)', 'Regimen',
+      'Reading Date', 'Day of Week',
+      'AM RBS (mg/dL)', 'AM RBS Status',
+      'AM N Dose (u)', 'AM R Dose (u)', 'AM Basal (u)', 'AM Bolus (u)', 'Missed AM Dose',
+      'PM RBS (mg/dL)', 'PM RBS Status',
+      'PM N Dose (u)', 'PM R Dose (u)', 'PM Basal (u)', 'PM Bolus (u)', 'Missed PM Dose',
+      'Notes'
+    ]
+
+    function rbsStatus(val) {
+      if (!val) return ''
+      if (val < 70) return 'Low'
+      if (val > 200) return 'High'
+      if (val > 150) return 'Borderline'
+      return 'Normal'
+    }
+
+    const rows = allLogs.map(l => {
+      const p = patientMap[l.patient_id]
+      if (!p) return null
+
+      const readingDate = parseISO(l.log_date)
+      const ageAtReading = p.dob ? differenceInYears(readingDate, parseISO(p.dob)) : ''
+      const diagDuration = (p.dob && p.diagnosis_year)
+        ? Math.max(0, readingDate.getFullYear() - p.diagnosis_year)
+        : ''
+      const dayOfWeek = format(readingDate, 'EEEE')
+
+      return [
+        p.anonId,
+        ageAtReading,
+        p.sex || '',
+        p.weight_kg || '',
+        diagDuration,
+        REGIMEN_LABELS[p.regimen] || p.regimen || '',
+        l.log_date,
+        dayOfWeek,
+        l.am_rbs ?? '',
+        rbsStatus(l.am_rbs),
+        l.am_n_dose ?? '', l.am_r_dose ?? '', l.am_basal ?? '', l.am_bolus ?? '',
+        l.missed_am_dose ? '1' : '0',
+        l.pm_rbs ?? '',
+        rbsStatus(l.pm_rbs),
+        l.pm_n_dose ?? '', l.pm_r_dose ?? '', l.pm_basal ?? '', l.pm_bolus ?? '',
+        l.missed_pm_dose ? '1' : '0',
+        l.notes || ''
+      ]
+    }).filter(Boolean)
+
+    const csv = [headers, ...rows].map(r => r.map(v => `"${String(v).replace(/"/g, '""')}"`).join(',')).join('\n')
+    const blob = new Blob([csv], { type: 'text/csv' })
+    const url = URL.createObjectURL(blob)
+    const a = document.createElement('a')
+    a.href = url
+    a.download = `glucotrack_research_${format(new Date(), 'yyyy-MM-dd')}.csv`
+    a.click()
+    URL.revokeObjectURL(url)
+  }
+
+  function exportResearchCSV() {
+    const patientMap = {}
+    // Assign anonymous numeric IDs — sorted by created_at for consistency
+    const sortedPatients = [...patients].sort((a, b) => new Date(a.created_at) - new Date(b.created_at))
+    sortedPatients.forEach((p, i) => { patientMap[p.id] = { ...p, anonId: `PT-${String(i + 1).padStart(3, '0')}` } })
+
+    const headers = [
+      'Patient ID', 'Age at Reading', 'Sex', 'Weight (kg)',
+      'Diabetes Duration (yrs)', 'Regimen',
+      'Reading Date', 'Time Point', 'RBS (mg/dL)',
+      'N Dose (units)', 'R Dose (units)', 'Basal Dose (units)', 'Bolus Dose (units)',
+      'Missed Dose', 'RBS Category', 'Notes'
+    ]
+
+    const rows = []
+    allLogs.forEach(l => {
+      const p = patientMap[l.patient_id]
+      if (!p) return
+
+      const ageAtReading = p.dob ? differenceInYears(parseISO(l.log_date), parseISO(p.dob)) : ''
+      const diabetesDuration = (p.dob && p.diagnosis_year)
+        ? differenceInYears(parseISO(l.log_date), new Date(p.diagnosis_year, 0, 1))
+        : ''
+      const regimen = REGIMEN_LABELS[p.regimen] || p.regimen || ''
+
+      function rbsCategory(val) {
+        if (!val) return ''
+        if (val < 70) return 'Low'
+        if (val <= 150) return 'Normal'
+        if (val <= 200) return 'Borderline'
+        return 'High'
+      }
+
+      // AM row
+      if (l.am_rbs || l.am_n_dose || l.am_r_dose || l.am_basal || l.am_bolus) {
+        rows.push([
+          p.anonId, ageAtReading, p.sex || '', p.weight_kg || '',
+          diabetesDuration, regimen,
+          l.log_date, 'AM', l.am_rbs ?? '',
+          l.am_n_dose ?? '', l.am_r_dose ?? '', l.am_basal ?? '', l.am_bolus ?? '',
+          l.missed_am_dose ? 1 : 0,
+          rbsCategory(l.am_rbs),
+          l.notes || ''
+        ])
+      }
+
+      // PM row
+      if (l.pm_rbs || l.pm_n_dose || l.pm_r_dose || l.pm_basal || l.pm_bolus) {
+        rows.push([
+          p.anonId, ageAtReading, p.sex || '', p.weight_kg || '',
+          diabetesDuration, regimen,
+          l.log_date, 'PM', l.pm_rbs ?? '',
+          l.pm_n_dose ?? '', l.pm_r_dose ?? '', l.pm_basal ?? '', l.pm_bolus ?? '',
+          l.missed_pm_dose ? 1 : 0,
+          rbsCategory(l.pm_rbs),
+          l.notes || ''
+        ])
+      }
+    })
+
+    const csv = [headers, ...rows].map(r => r.map(v => `"${String(v).replace(/"/g, '""')}"`).join(',')).join('\n')
+    const blob = new Blob([csv], { type: 'text/csv' })
+    const url = URL.createObjectURL(blob)
+    const a = document.createElement('a')
+    a.href = url
+    a.download = `glucotrack_research_anonymised_${format(new Date(), 'yyyy-MM-dd')}.csv`
+    a.click()
+    URL.revokeObjectURL(url)
+  }
+
   const filtered = patients.filter(p =>
     p.full_name?.toLowerCase().includes(search.toLowerCase()) ||
     p.physician_name?.toLowerCase().includes(search.toLowerCase())
@@ -176,7 +312,15 @@ export default function DoctorDashboard() {
             disabled={exportingAll || allLogs.length === 0}
             style={{ marginLeft: 'auto' }}
           >
-            {exportingAll ? '⏳ Exporting…' : '⬇ Export All Patients CSV'}
+            {exportingAll ? '⏳ Exporting…' : '⬇ Export All (Clinical)'}
+          </button>
+          <button
+            className="btn btn-secondary"
+            onClick={exportResearchCSV}
+            disabled={allLogs.length === 0}
+            title="Anonymised export for research — no names or DOBs"
+          >
+            🔬 Export Research CSV
           </button>
         </div>
 
