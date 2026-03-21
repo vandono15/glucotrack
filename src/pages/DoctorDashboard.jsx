@@ -58,108 +58,159 @@ export default function DoctorDashboard() {
 
   async function handleSignOut() { await supabase.auth.signOut() }
 
+  function rbsStatus(val) {
+    if (!val) return ''
+    if (val < 70) return 'Low'
+    if (val > 200) return 'High'
+    if (val > 150) return 'Borderline'
+    return 'Normal'
+  }
+
+  function downloadCSV(content, filename) {
+    const blob = new Blob([content], { type: 'text/csv' })
+    const url = URL.createObjectURL(blob)
+    const a = document.createElement('a')
+    a.href = url; a.download = filename; a.click()
+    URL.revokeObjectURL(url)
+  }
+
+  function buildCSV(rows) {
+    return rows.map(r => r.map(v => `"${String(v ?? '').replace(/"/g, '""')}"`).join(',')).join('\n')
+  }
+
   function exportAllCSV() {
     setExportingAll(true)
-    const headers = [
-      'Patient Name', 'DOB', 'Age', 'Sex', 'Weight (kg)', 'Diagnosis Year', 'Regimen',
-      'Date', 'AM RBS', 'AM N Dose', 'AM R Dose', 'AM Basal', 'AM Bolus',
-      'Missed AM', 'PM RBS', 'PM N Dose', 'PM R Dose', 'PM Basal', 'PM Bolus', 'Missed PM', 'Notes'
-    ]
-
     const patientMap = {}
     patients.forEach(p => { patientMap[p.id] = p })
 
-    const rows = allLogs.map(l => {
-      const p = patientMap[l.patient_id]
-      const age = p?.dob ? differenceInYears(new Date(), parseISO(p.dob)) : ''
+    // ── Sheet 1: Patient Summary ──
+    const summaryHeaders = [
+      'Patient Name', 'DOB', 'Age', 'Sex', 'Weight (kg)', 'Diagnosis Year',
+      'Diabetes Duration (yrs)', 'Regimen', 'Physician',
+      'Total Readings', 'Avg RBS (mg/dL)', 'Time in Range %',
+      'High Readings (>200)', 'Low Readings (<70)', 'Missed Dose Days', 'Notes'
+    ]
+    const summaryRows = patients.map(p => {
+      const logs = allLogs.filter(l => l.patient_id === p.id)
+      const rbs = logs.flatMap(l => [l.am_rbs, l.pm_rbs].filter(Boolean))
+      const avg = rbs.length ? Math.round(rbs.reduce((a, b) => a + b, 0) / rbs.length) : ''
+      const tir = rbs.length ? Math.round(rbs.filter(v => v >= 70 && v <= 180).length / rbs.length * 100) : ''
+      const high = rbs.filter(v => v > 200).length
+      const low = rbs.filter(v => v < 70).length
+      const missed = logs.filter(l => l.missed_am_dose || l.missed_pm_dose).length
+      const age = p.dob ? differenceInYears(new Date(), parseISO(p.dob)) : ''
+      const duration = p.diagnosis_year ? new Date().getFullYear() - p.diagnosis_year : ''
       return [
-        p?.full_name || '', p?.dob || '', age, p?.sex || '', p?.weight_kg || '',
-        p?.diagnosis_year || '', REGIMEN_LABELS[p?.regimen] || p?.regimen || '',
-        l.log_date, l.am_rbs ?? '', l.am_n_dose ?? '', l.am_r_dose ?? '',
-        l.am_basal ?? '', l.am_bolus ?? '',
-        l.missed_am_dose ? 'Yes' : '',
-        l.pm_rbs ?? '', l.pm_n_dose ?? '', l.pm_r_dose ?? '',
-        l.pm_basal ?? '', l.pm_bolus ?? '',
-        l.missed_pm_dose ? 'Yes' : '',
-        l.notes || ''
+        p.full_name || '', p.dob || '', age, p.sex || '', p.weight_kg || '',
+        p.diagnosis_year || '', duration, REGIMEN_LABELS[p.regimen] || p.regimen || '',
+        p.physician_name || '', rbs.length, avg, tir ? `${tir}%` : '',
+        high, low, missed, p.notes || ''
       ]
     })
 
-    const csv = [headers, ...rows].map(r => r.map(v => `"${String(v).replace(/"/g, '""')}"`).join(',')).join('\n')
-    const blob = new Blob([csv], { type: 'text/csv' })
-    const url = URL.createObjectURL(blob)
-    const a = document.createElement('a')
-    a.href = url
-    a.download = `glucotrack_all_patients_${format(new Date(), 'yyyy-MM-dd')}.csv`
-    a.click()
-    URL.revokeObjectURL(url)
+    // ── Sheet 2: All Readings ──
+    const readingsHeaders = [
+      'Patient Name', 'DOB', 'Sex', 'Weight (kg)', 'Regimen',
+      'Date', 'AM RBS', 'AM RBS Status', 'AM N Dose', 'AM R Dose', 'AM Basal', 'AM Bolus', 'Missed AM',
+      'PM RBS', 'PM RBS Status', 'PM N Dose', 'PM R Dose', 'PM Basal', 'PM Bolus', 'Missed PM', 'Notes'
+    ]
+    const readingRows = []
+    patients.forEach(p => {
+      const logs = allLogs.filter(l => l.patient_id === p.id).sort((a, b) => a.log_date.localeCompare(b.log_date))
+      logs.forEach(l => {
+        readingRows.push([
+          p.full_name || '', p.dob || '', p.sex || '', p.weight_kg || '',
+          REGIMEN_LABELS[p.regimen] || p.regimen || '',
+          l.log_date, l.am_rbs ?? '', rbsStatus(l.am_rbs),
+          l.am_n_dose ?? '', l.am_r_dose ?? '', l.am_basal ?? '', l.am_bolus ?? '',
+          l.missed_am_dose ? 'Yes' : '',
+          l.pm_rbs ?? '', rbsStatus(l.pm_rbs),
+          l.pm_n_dose ?? '', l.pm_r_dose ?? '', l.pm_basal ?? '', l.pm_bolus ?? '',
+          l.missed_pm_dose ? 'Yes' : '',
+          l.notes || ''
+        ])
+      })
+      // Blank separator row between patients
+      readingRows.push(Array(21).fill(''))
+    })
+
+    const dateStr = format(new Date(), 'yyyy-MM-dd')
+    downloadCSV(buildCSV([summaryHeaders, ...summaryRows]), `glucotrack_clinical_summary_${dateStr}.csv`)
+    setTimeout(() => {
+      downloadCSV(buildCSV([readingsHeaders, ...readingRows]), `glucotrack_clinical_readings_${dateStr}.csv`)
+    }, 500)
+
     setExportingAll(false)
   }
 
   function exportResearchCSV() {
     const patientMap = {}
-    // Assign anonymous numeric IDs
-    patients.forEach((p, i) => { patientMap[p.id] = { ...p, anonId: `PT${String(i + 1).padStart(3, '0')}` } })
+    patients.forEach((p, i) => {
+      patientMap[p.id] = { ...p, anonId: `PT${String(i + 1).padStart(3, '0')}` }
+    })
 
-    const headers = [
-      'Patient ID', 'Age at Reading', 'Sex', 'Weight (kg)',
+    // ── Sheet 1: Research Summary (anonymised) ──
+    const summaryHeaders = [
+      'Patient ID', 'Age', 'Sex', 'Weight (kg)', 'Diagnosis Year',
       'Diabetes Duration (yrs)', 'Regimen',
-      'Reading Date', 'Day of Week',
-      'AM RBS (mg/dL)', 'AM RBS Status',
-      'AM N Dose (u)', 'AM R Dose (u)', 'AM Basal (u)', 'AM Bolus (u)', 'Missed AM Dose',
-      'PM RBS (mg/dL)', 'PM RBS Status',
-      'PM N Dose (u)', 'PM R Dose (u)', 'PM Basal (u)', 'PM Bolus (u)', 'Missed PM Dose',
-      'Notes'
+      'Total Readings', 'Avg RBS (mg/dL)', 'Time in Range %',
+      'High Readings (>200)', 'Low Readings (<70)', 'Missed Dose Days'
     ]
-
-    function rbsStatus(val) {
-      if (!val) return ''
-      if (val < 70) return 'Low'
-      if (val > 200) return 'High'
-      if (val > 150) return 'Borderline'
-      return 'Normal'
-    }
-
-    const rows = allLogs.map(l => {
-      const p = patientMap[l.patient_id]
-      if (!p) return null
-
-      const readingDate = parseISO(l.log_date)
-      const ageAtReading = p.dob ? differenceInYears(readingDate, parseISO(p.dob)) : ''
-      const diagDuration = (p.dob && p.diagnosis_year)
-        ? Math.max(0, readingDate.getFullYear() - p.diagnosis_year)
-        : ''
-      const dayOfWeek = format(readingDate, 'EEEE')
-
+    const summaryRows = patients.map(p => {
+      const anon = patientMap[p.id]
+      const logs = allLogs.filter(l => l.patient_id === p.id)
+      const rbs = logs.flatMap(l => [l.am_rbs, l.pm_rbs].filter(Boolean))
+      const avg = rbs.length ? Math.round(rbs.reduce((a, b) => a + b, 0) / rbs.length) : ''
+      const tir = rbs.length ? Math.round(rbs.filter(v => v >= 70 && v <= 180).length / rbs.length * 100) : ''
+      const high = rbs.filter(v => v > 200).length
+      const low = rbs.filter(v => v < 70).length
+      const missed = logs.filter(l => l.missed_am_dose || l.missed_pm_dose).length
+      const age = p.dob ? differenceInYears(new Date(), parseISO(p.dob)) : ''
+      const duration = p.diagnosis_year ? new Date().getFullYear() - p.diagnosis_year : ''
       return [
-        p.anonId,
-        ageAtReading,
-        p.sex || '',
-        p.weight_kg || '',
-        diagDuration,
-        REGIMEN_LABELS[p.regimen] || p.regimen || '',
-        l.log_date,
-        dayOfWeek,
-        l.am_rbs ?? '',
-        rbsStatus(l.am_rbs),
-        l.am_n_dose ?? '', l.am_r_dose ?? '', l.am_basal ?? '', l.am_bolus ?? '',
-        l.missed_am_dose ? '1' : '0',
-        l.pm_rbs ?? '',
-        rbsStatus(l.pm_rbs),
-        l.pm_n_dose ?? '', l.pm_r_dose ?? '', l.pm_basal ?? '', l.pm_bolus ?? '',
-        l.missed_pm_dose ? '1' : '0',
-        l.notes || ''
+        anon.anonId, age, p.sex || '', p.weight_kg || '',
+        p.diagnosis_year || '', duration, REGIMEN_LABELS[p.regimen] || p.regimen || '',
+        rbs.length, avg, tir ? `${tir}%` : '', high, low, missed
       ]
-    }).filter(Boolean)
+    })
 
-    const csv = [headers, ...rows].map(r => r.map(v => `"${String(v).replace(/"/g, '""')}"`).join(',')).join('\n')
-    const blob = new Blob([csv], { type: 'text/csv' })
-    const url = URL.createObjectURL(blob)
-    const a = document.createElement('a')
-    a.href = url
-    a.download = `glucotrack_research_${format(new Date(), 'yyyy-MM-dd')}.csv`
-    a.click()
-    URL.revokeObjectURL(url)
+    // ── Sheet 2: Research Readings (anonymised) ──
+    const readingsHeaders = [
+      'Patient ID', 'Age at Reading', 'Sex', 'Weight (kg)',
+      'Diabetes Duration (yrs)', 'Regimen', 'Date', 'Day of Week',
+      'AM RBS (mg/dL)', 'AM RBS Status',
+      'AM N Dose (u)', 'AM R Dose (u)', 'AM Basal (u)', 'AM Bolus (u)', 'Missed AM (0/1)',
+      'PM RBS (mg/dL)', 'PM RBS Status',
+      'PM N Dose (u)', 'PM R Dose (u)', 'PM Basal (u)', 'PM Bolus (u)', 'Missed PM (0/1)'
+    ]
+    const readingRows = []
+    patients.forEach(p => {
+      const anon = patientMap[p.id]
+      const logs = allLogs.filter(l => l.patient_id === p.id).sort((a, b) => a.log_date.localeCompare(b.log_date))
+      logs.forEach(l => {
+        const readingDate = parseISO(l.log_date)
+        const ageAtReading = p.dob ? differenceInYears(readingDate, parseISO(p.dob)) : ''
+        const duration = p.diagnosis_year ? Math.max(0, readingDate.getFullYear() - p.diagnosis_year) : ''
+        readingRows.push([
+          anon.anonId, ageAtReading, p.sex || '', p.weight_kg || '',
+          duration, REGIMEN_LABELS[p.regimen] || p.regimen || '',
+          l.log_date, format(readingDate, 'EEEE'),
+          l.am_rbs ?? '', rbsStatus(l.am_rbs),
+          l.am_n_dose ?? '', l.am_r_dose ?? '', l.am_basal ?? '', l.am_bolus ?? '',
+          l.missed_am_dose ? '1' : '0',
+          l.pm_rbs ?? '', rbsStatus(l.pm_rbs),
+          l.pm_n_dose ?? '', l.pm_r_dose ?? '', l.pm_basal ?? '', l.pm_bolus ?? '',
+          l.missed_pm_dose ? '1' : '0'
+        ])
+      })
+      readingRows.push(Array(22).fill(''))
+    })
+
+    const dateStr = format(new Date(), 'yyyy-MM-dd')
+    downloadCSV(buildCSV([summaryHeaders, ...summaryRows]), `glucotrack_research_summary_${dateStr}.csv`)
+    setTimeout(() => {
+      downloadCSV(buildCSV([readingsHeaders, ...readingRows]), `glucotrack_research_readings_${dateStr}.csv`)
+    }, 500)
   }
 
   function exportResearchCSV() {
