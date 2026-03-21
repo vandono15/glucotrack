@@ -26,9 +26,22 @@ export default function App() {
   }, [])
 
   async function fetchRole(userId) {
-    const { data } = await supabase.from('profiles').select('role').eq('id', userId).single()
-    setRole(data?.role || null)
+  let attempts = 0
+  while (attempts < 10) {
+    const { data } = await supabase
+      .from('profiles')
+      .select('role')
+      .eq('id', userId)
+      .single()
+    if (data?.role) {
+      setRole(data.role)
+      return
+    }
+    attempts++
+    await new Promise(res => setTimeout(res, 800))
   }
+  setRole(null)
+}
 
   if (session === undefined) {
     return <div className="loading-screen"><div className="spinner" /></div>
