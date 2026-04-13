@@ -20,7 +20,7 @@ export default function PatientRegister() {
     email: '', password: '', confirmPassword: '',
     full_name: '', dob: '', weight_kg: '', sex: '',
     diagnosis_year: '', regimen: 'nph_regular',
-    physician_name: '', notes: ''
+    physician_name: '', address_area: '', phone: '', notes: ''
   })
 
   function set(field) {
@@ -30,20 +30,15 @@ export default function PatientRegister() {
   async function handleSubmit(e) {
     e.preventDefault()
     if (form.password !== form.confirmPassword) {
-      setError('Passwords do not match')
-      return
+      setError('Passwords do not match'); return
     }
-    setLoading(true)
-    setError('')
+    setLoading(true); setError('')
 
-    // Sign up
     const { data: authData, error: authErr } = await supabase.auth.signUp({
-      email: form.email,
-      password: form.password,
+      email: form.email, password: form.password,
     })
     if (authErr) { setError(authErr.message); setLoading(false); return }
 
-    // Insert profile
     const { error: profileErr } = await supabase.from('profiles').insert({
       id: authData.user.id,
       role: 'patient',
@@ -54,7 +49,9 @@ export default function PatientRegister() {
       diagnosis_year: parseInt(form.diagnosis_year) || null,
       regimen: form.regimen,
       physician_name: form.physician_name,
-      notes: form.notes,
+      address_area: form.address_area || null,
+      phone: form.phone || null,
+      notes: form.notes || null,
     })
 
     if (profileErr) { setError(profileErr.message); setLoading(false); return }
@@ -64,8 +61,7 @@ export default function PatientRegister() {
 
   return (
     <div style={{ minHeight: '100vh', display: 'flex', alignItems: 'center', justifyContent: 'center', padding: '24px' }}>
-      <div style={{ width: '100%', maxWidth: '480px' }}>
-
+      <div style={{ width: '100%', maxWidth: '500px' }}>
         <div style={{ textAlign: 'center', marginBottom: '32px' }}>
           <span style={{ fontFamily: 'var(--font-display)', fontSize: '22px', color: 'var(--text)' }}>GlucoTrack</span>
           <p style={{ color: 'var(--text-muted)', fontSize: '14px', marginTop: '4px' }}>Patient Registration</p>
@@ -88,7 +84,6 @@ export default function PatientRegister() {
           {step === 1 && (
             <div style={{ display: 'flex', flexDirection: 'column', gap: '16px' }}>
               <h2 style={{ fontSize: '17px', fontWeight: 600, marginBottom: '4px' }}>Account Details</h2>
-
               <div className="field">
                 <label>Full Name</label>
                 <input className="input" placeholder="First Last" value={form.full_name} onChange={set('full_name')} required />
@@ -107,21 +102,12 @@ export default function PatientRegister() {
                   <input className="input" type="password" placeholder="••••••••" value={form.confirmPassword} onChange={set('confirmPassword')} required />
                 </div>
               </div>
-
-              <button
-                className="btn btn-primary"
-                style={{ width: '100%', justifyContent: 'center', marginTop: '8px' }}
+              <button className="btn btn-primary" style={{ width: '100%', justifyContent: 'center', marginTop: '8px' }}
                 onClick={() => {
-                  if (!form.full_name || !form.email || !form.password || !form.confirmPassword) {
-                    setError('Please fill in all fields'); return
-                  }
-                  if (form.password !== form.confirmPassword) {
-                    setError('Passwords do not match'); return
-                  }
-                  setError('')
-                  setStep(2)
-                }}
-              >
+                  if (!form.full_name || !form.email || !form.password || !form.confirmPassword) { setError('Please fill in all fields'); return }
+                  if (form.password !== form.confirmPassword) { setError('Passwords do not match'); return }
+                  setError(''); setStep(2)
+                }}>
                 Continue →
               </button>
             </div>
@@ -130,7 +116,6 @@ export default function PatientRegister() {
           {step === 2 && (
             <form onSubmit={handleSubmit} style={{ display: 'flex', flexDirection: 'column', gap: '16px' }}>
               <h2 style={{ fontSize: '17px', fontWeight: 600, marginBottom: '4px' }}>Medical Profile</h2>
-
               <div className="grid-2">
                 <div className="field">
                   <label>Date of Birth</label>
@@ -145,7 +130,6 @@ export default function PatientRegister() {
                   </select>
                 </div>
               </div>
-
               <div className="grid-2">
                 <div className="field">
                   <label>Weight (kg)</label>
@@ -156,24 +140,30 @@ export default function PatientRegister() {
                   <input className="input" type="number" placeholder="e.g. 2020" value={form.diagnosis_year} onChange={set('diagnosis_year')} />
                 </div>
               </div>
-
               <div className="field">
                 <label>Insulin Regimen</label>
                 <select className="input" value={form.regimen} onChange={set('regimen')}>
                   {REGIMENS.map(r => <option key={r.value} value={r.value}>{r.label}</option>)}
                 </select>
               </div>
-
               <div className="field">
                 <label>Physician Name</label>
                 <input className="input" placeholder="Dr. Smith" value={form.physician_name} onChange={set('physician_name')} />
               </div>
-
+              <div className="grid-2">
+                <div className="field">
+                  <label>Area / District</label>
+                  <input className="input" placeholder="e.g. San Fernando" value={form.address_area} onChange={set('address_area')} />
+                </div>
+                <div className="field">
+                  <label>Phone Number</label>
+                  <input className="input" type="tel" placeholder="e.g. 868-xxx-xxxx" value={form.phone} onChange={set('phone')} />
+                </div>
+              </div>
               <div className="field">
                 <label>Additional Notes (optional)</label>
                 <textarea className="input" rows={2} placeholder="Allergies, other conditions…" value={form.notes} onChange={set('notes')} style={{ resize: 'vertical' }} />
               </div>
-
               <div style={{ display: 'flex', gap: '10px', marginTop: '8px' }}>
                 <button type="button" className="btn btn-secondary" onClick={() => setStep(1)}>← Back</button>
                 <button type="submit" className="btn btn-primary" style={{ flex: 1, justifyContent: 'center' }} disabled={loading}>
@@ -185,8 +175,7 @@ export default function PatientRegister() {
         </div>
 
         <p style={{ textAlign: 'center', marginTop: '20px', fontSize: '14px', color: 'var(--text-muted)' }}>
-          Already registered?{' '}
-          <Link to="/login" style={{ color: 'var(--accent)', textDecoration: 'none', fontWeight: 500 }}>Sign in</Link>
+          Already registered? <Link to="/login" style={{ color: 'var(--accent)', textDecoration: 'none', fontWeight: 500 }}>Sign in</Link>
         </p>
       </div>
     </div>

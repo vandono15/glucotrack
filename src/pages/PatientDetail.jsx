@@ -17,6 +17,15 @@ const REGIMEN_LABELS = {
   other: 'Other',
 }
 
+const TIME_POINT_LINES = [
+  { key: 'fasting_rbs', label: 'Fasting', color: '#3ecf8e' },
+  { key: 'am_rbs', label: 'AM', color: '#6366f1' },
+  { key: 'pre_lunch_rbs', label: 'Pre-Lunch', color: '#f59e0b' },
+  { key: 'pre_dinner_rbs', label: 'Pre-Dinner', color: '#f97316' },
+  { key: 'pm_rbs', label: 'PM', color: '#a78bfa' },
+  { key: 'bedtime_rbs', label: 'Bedtime', color: '#ec4899' },
+]
+
 function rbsBadge(val) {
   if (!val) return null
   if (val < 70) return { label: 'Low', cls: 'badge-low' }
@@ -45,7 +54,7 @@ const CustomTooltip = ({ active, payload, label }) => {
         {payload.map(p => p.value != null && (
           <div key={p.dataKey} style={{ color: p.color, display: 'flex', gap: 8 }}>
             <span>{p.name}:</span>
-            <span style={{ fontFamily: 'var(--font-mono)', fontWeight: 600 }}>{p.value}{p.name === 'HbA1c' ? '%' : ' mg/dL'}</span>
+            <span style={{ fontFamily: 'var(--font-mono)', fontWeight: 600 }}>{p.value} mg/dL</span>
           </div>
         ))}
       </div>
@@ -55,7 +64,7 @@ const CustomTooltip = ({ active, payload, label }) => {
 }
 
 function TimeInRangeChart({ logs }) {
-  const allRBS = logs.flatMap(l => [l.am_rbs, l.pm_rbs].filter(Boolean))
+  const allRBS = logs.flatMap(l => [l.fasting_rbs, l.am_rbs, l.pre_lunch_rbs, l.pre_dinner_rbs, l.pm_rbs, l.bedtime_rbs].filter(Boolean))
   if (allRBS.length === 0) return <p style={{ color: 'var(--text-muted)', fontSize: 14 }}>No readings yet.</p>
   const low = allRBS.filter(v => v < 70).length
   const normal = allRBS.filter(v => v >= 70 && v <= 150).length
@@ -64,29 +73,26 @@ function TimeInRangeChart({ logs }) {
   const total = allRBS.length
   const pct = v => Math.round((v / total) * 100)
   const data = [
-    { name: 'Normal (70–150)', value: normal, color: '#3ecf8e' },
-    { name: 'Borderline (151–200)', value: borderline, color: '#fbbf24' },
-    { name: 'High (>200)', value: high, color: '#f87171' },
-    { name: 'Low (<70)', value: low, color: '#60a5fa' },
+    { name: 'Normal', value: normal, color: '#3ecf8e' },
+    { name: 'Borderline', value: borderline, color: '#fbbf24' },
+    { name: 'High', value: high, color: '#f87171' },
+    { name: 'Low', value: low, color: '#60a5fa' },
   ].filter(d => d.value > 0)
-
   return (
-    <div style={{ display: 'flex', alignItems: 'center', gap: '32px', flexWrap: 'wrap' }}>
+    <div style={{ display: 'flex', alignItems: 'center', gap: 32, flexWrap: 'wrap' }}>
       <ResponsiveContainer width={160} height={160}>
-        <PieChart>
-          <Pie data={data} cx="50%" cy="50%" innerRadius={48} outerRadius={72} paddingAngle={2} dataKey="value">
-            {data.map((entry, i) => <Cell key={i} fill={entry.color} />)}
-          </Pie>
-        </PieChart>
+        <PieChart><Pie data={data} cx="50%" cy="50%" innerRadius={48} outerRadius={72} paddingAngle={2} dataKey="value">
+          {data.map((e, i) => <Cell key={i} fill={e.color} />)}
+        </Pie></PieChart>
       </ResponsiveContainer>
-      <div style={{ display: 'flex', flexDirection: 'column', gap: '10px' }}>
+      <div style={{ display: 'flex', flexDirection: 'column', gap: 10 }}>
         {[
           { label: 'Normal (70–150)', val: normal, color: '#3ecf8e' },
           { label: 'Borderline (151–200)', val: borderline, color: '#fbbf24' },
           { label: 'High (>200)', val: high, color: '#f87171' },
           { label: 'Low (<70)', val: low, color: '#60a5fa' },
         ].map(item => (
-          <div key={item.label} style={{ display: 'flex', alignItems: 'center', gap: '10px' }}>
+          <div key={item.label} style={{ display: 'flex', alignItems: 'center', gap: 10 }}>
             <div style={{ width: 10, height: 10, borderRadius: 2, background: item.color, flexShrink: 0 }} />
             <span style={{ fontSize: 13, color: 'var(--text-muted)' }}>{item.label}</span>
             <span style={{ fontFamily: 'var(--font-mono)', fontSize: 13, fontWeight: 700, marginLeft: 'auto', paddingLeft: 16, color: 'var(--text)' }}>{pct(item.val)}%</span>
@@ -109,11 +115,13 @@ export default function PatientDetail() {
   const [loading, setLoading] = useState(true)
   const [activeTab, setActiveTab] = useState('overview')
   const [chartDays, setChartDays] = useState(7)
+  const [visibleLines, setVisibleLines] = useState(
+    TIME_POINT_LINES.reduce((acc, l) => ({ ...acc, [l.key]: true }), {})
+  )
 
   const [hba1cForm, setHba1cForm] = useState({ recorded_date: format(new Date(), 'yyyy-MM-dd'), hba1c_percent: '', notes: '' })
   const [savingHba1c, setSavingHba1c] = useState(false)
   const [hba1cMsg, setHba1cMsg] = useState('')
-
   const [noteForm, setNoteForm] = useState({ note_date: format(new Date(), 'yyyy-MM-dd'), note: '' })
   const [savingNote, setSavingNote] = useState(false)
   const [noteMsg, setNoteMsg] = useState('')
@@ -162,69 +170,62 @@ export default function PatientDetail() {
   }
 
   function exportCSV() {
-    const isNPH = profile?.regimen === 'nph_regular' || profile?.regimen === 'premixed_70_30'
-    const headers = isNPH
-      ? ['Date','AM RBS','AM N Dose','AM R Dose','Missed AM','PM RBS','PM N Dose','PM R Dose','Missed PM','Notes']
-      : ['Date','AM RBS','AM Basal','AM Bolus','Missed AM','PM RBS','PM Basal','PM Bolus','Missed PM','Notes']
-    const rows = logs.map(l => isNPH
-      ? [l.log_date,l.am_rbs,l.am_n_dose,l.am_r_dose,l.missed_am_dose?'Yes':'',l.pm_rbs,l.pm_n_dose,l.pm_r_dose,l.missed_pm_dose?'Yes':'',l.notes].map(v=>v??'')
-      : [l.log_date,l.am_rbs,l.am_basal,l.am_bolus,l.missed_am_dose?'Yes':'',l.pm_rbs,l.pm_basal,l.pm_bolus,l.missed_pm_dose?'Yes':'',l.notes].map(v=>v??'')
-    )
-    const csv = [headers,...rows].map(r=>r.join(',')).join('\n')
-    const blob = new Blob([csv],{type:'text/csv'})
+    const headers = ['Date', 'Fasting RBS', 'AM RBS', 'Pre-Lunch RBS', 'Pre-Dinner RBS', 'PM RBS', 'Bedtime RBS',
+      'Fasting N', 'Fasting R', 'AM N', 'AM R', 'Lunch N', 'Lunch R', 'Dinner N', 'Dinner R', 'PM N', 'PM R', 'Bedtime N',
+      'Missed Doses', 'Hypo Symptoms', 'Exercise', 'Notes']
+    const rows = logs.map(l => [
+      l.log_date, l.fasting_rbs ?? '', l.am_rbs ?? '', l.pre_lunch_rbs ?? '', l.pre_dinner_rbs ?? '', l.pm_rbs ?? '', l.bedtime_rbs ?? '',
+      l.fasting_n_dose ?? '', l.fasting_r_dose ?? '', l.am_n_dose ?? '', l.am_r_dose ?? '',
+      l.lunch_n_dose ?? '', l.lunch_r_dose ?? '', l.dinner_n_dose ?? '', l.dinner_r_dose ?? '',
+      l.pm_n_dose ?? '', l.pm_r_dose ?? '', l.bedtime_n_dose ?? '',
+      [l.missed_am_dose && 'AM', l.missed_lunch_dose && 'Lunch', l.missed_dinner_dose && 'Dinner', l.missed_pm_dose && 'PM', l.missed_bedtime_dose && 'Bedtime'].filter(Boolean).join(', '),
+      l.hypo_symptoms || '', l.exercise_notes || '', l.notes || ''
+    ])
+    const csv = [headers, ...rows].map(r => r.map(v => `"${String(v ?? '').replace(/"/g, '""')}"`).join(',')).join('\n')
+    const blob = new Blob([csv], { type: 'text/csv' })
     const url = URL.createObjectURL(blob)
-    const a = document.createElement('a'); a.href=url; a.download=`${profile?.full_name?.replace(/\s+/g,'_')}_glucose_log.csv`; a.click()
+    const a = document.createElement('a'); a.href = url; a.download = `${profile?.full_name?.replace(/\s+/g, '_')}_logs.csv`; a.click()
     URL.revokeObjectURL(url)
   }
 
   if (loading) return <div className="loading-screen"><div className="spinner" /></div>
   if (!profile) return <div className="loading-screen">Patient not found</div>
 
-  const isNPH = profile?.regimen === 'nph_regular' || profile?.regimen === 'premixed_70_30' || !profile?.regimen
   const age = profile?.dob ? differenceInYears(new Date(), parseISO(profile.dob)) : null
   const streak = calcStreak(logs)
 
-  // Chart data
   const chartLogs = [...logs].slice(-chartDays)
-  const chartData = chartLogs.map(l => ({
-    date: format(parseISO(l.log_date), 'MMM d'),
-    'AM RBS': l.am_rbs || null,
-    'PM RBS': l.pm_rbs || null,
-  }))
+  const chartData = chartLogs.map(l => {
+    const obj = { date: format(parseISO(l.log_date), 'MMM d') }
+    TIME_POINT_LINES.forEach(tp => { obj[tp.label] = l[tp.key] || null })
+    return obj
+  })
 
-  // Stats for selected period
+  // 7-day stats using all time points
   const periodLogs = [...logs].slice(-7)
-  const periodRBS = periodLogs.flatMap(l => [l.am_rbs, l.pm_rbs].filter(Boolean))
-  const avgRBS7 = periodRBS.length ? Math.round(periodRBS.reduce((a,b)=>a+b,0)/periodRBS.length) : null
-  const minRBS7 = periodRBS.length ? Math.min(...periodRBS) : null
-  const maxRBS7 = periodRBS.length ? Math.max(...periodRBS) : null
-  const hypoEvents7 = periodLogs.filter(l => l.am_rbs < 70 || l.pm_rbs < 70).length
-  const normalCount7 = periodRBS.filter(v => v >= 70 && v <= 180).length
-  const tirPct = periodRBS.length ? Math.round((normalCount7 / periodRBS.length) * 100) : null
+  const allRBS7 = periodLogs.flatMap(l => TIME_POINT_LINES.map(tp => l[tp.key]).filter(Boolean))
+  const avgRBS7 = allRBS7.length ? Math.round(allRBS7.reduce((a, b) => a + b, 0) / allRBS7.length) : null
+  const minRBS7 = allRBS7.length ? Math.min(...allRBS7) : null
+  const maxRBS7 = allRBS7.length ? Math.max(...allRBS7) : null
+  const hypoEvents7 = periodLogs.filter(l => TIME_POINT_LINES.some(tp => l[tp.key] && l[tp.key] < 70)).length
+  const tirPct = allRBS7.length ? Math.round(allRBS7.filter(v => v >= 70 && v <= 180).length / allRBS7.length * 100) : null
+  const missedCount = logs.filter(l => l.missed_am_dose || l.missed_pm_dose || l.missed_lunch_dose || l.missed_dinner_dose || l.missed_bedtime_dose).length
+  const hypoLogs = logs.filter(l => l.hypo_symptoms)
 
-  const allRBS = logs.flatMap(l => [l.am_rbs, l.pm_rbs].filter(Boolean))
-  const highCount = allRBS.filter(v => v > 200).length
-  const lowCount = allRBS.filter(v => v < 70).length
-  const missedCount = logs.filter(l => l.missed_am_dose || l.missed_pm_dose).length
-
-  const hba1cChartData = hba1cLogs.map(h => ({
-    date: format(parseISO(h.recorded_date), 'MMM yy'),
-    'HbA1c': h.hba1c_percent,
-  }))
-
-  const gridColor = theme === 'light' ? '#e2e8f0' : '#2d3748'
   const axisColor = theme === 'light' ? '#94a3b8' : '#8b949e'
+  const gridColor = theme === 'light' ? '#e2e8f0' : '#2d3748'
+
+  const hba1cChartData = hba1cLogs.map(h => ({ date: format(parseISO(h.recorded_date), 'MMM yy'), 'HbA1c': h.hba1c_percent }))
 
   return (
     <div className="page">
-      {/* Header */}
       <div style={{ background: 'var(--surface)', borderBottom: '1px solid var(--border)', padding: '14px 0' }}>
         <div className="container" style={{ display: 'flex', alignItems: 'center', justifyContent: 'space-between' }}>
-          <div style={{ display: 'flex', alignItems: 'center', gap: '12px' }}>
+          <div style={{ display: 'flex', alignItems: 'center', gap: 12 }}>
             <button className="btn btn-secondary btn-sm" onClick={() => navigate('/doctor')}>← Back</button>
             <span style={{ fontFamily: 'var(--font-display)', fontSize: '18px' }}>GlucoTrack</span>
           </div>
-          <div style={{ display: 'flex', alignItems: 'center', gap: '10px' }}>
+          <div style={{ display: 'flex', alignItems: 'center', gap: 10 }}>
             <ThemeToggle />
             <button className="btn btn-secondary btn-sm" onClick={exportCSV}>⬇ Export CSV</button>
           </div>
@@ -232,56 +233,50 @@ export default function PatientDetail() {
       </div>
 
       <div className="container" style={{ padding: '28px 24px' }}>
-
-        {/* Patient header card — matches screenshot style */}
-        <div className="card" style={{ marginBottom: '20px', borderLeft: '4px solid var(--accent2)' }}>
-          <div style={{ display: 'flex', justifyContent: 'space-between', flexWrap: 'wrap', gap: 16, alignItems: 'flex-start' }}>
+        {/* Profile card */}
+        <div className="card" style={{ marginBottom: 20, borderLeft: '4px solid var(--accent2)' }}>
+          <div style={{ display: 'flex', justifyContent: 'space-between', flexWrap: 'wrap', gap: 16 }}>
             <div>
-              <h1 style={{ fontSize: '24px', fontWeight: 700 }}>{profile.full_name}</h1>
-              <div style={{ color: 'var(--text-muted)', fontSize: '14px', marginTop: '4px' }}>
+              <h1 style={{ fontSize: 24, fontWeight: 700 }}>{profile.full_name}</h1>
+              <div style={{ color: 'var(--text-muted)', fontSize: 14, marginTop: 4 }}>
                 {age !== null ? `${age} years old` : ''}
                 {profile.sex ? ` · ${profile.sex === 'M' ? 'Male' : 'Female'}` : ''}
                 {profile.weight_kg ? ` · ${profile.weight_kg} kg` : ''}
                 {` · ${REGIMEN_LABELS[profile.regimen] || 'Unknown regimen'}`}
                 {profile.diagnosis_year ? ` · Dx ${profile.diagnosis_year}` : ''}
               </div>
-            </div>
-            <div style={{ display: 'flex', alignItems: 'center', gap: 12 }}>
-              <div style={{ textAlign: 'center', padding: '8px 16px', background: streak >= 7 ? 'rgba(62,207,142,0.1)' : 'var(--surface2)', borderRadius: 10, border: `1px solid ${streak >= 7 ? 'var(--accent)' : 'var(--border)'}` }}>
-                <div style={{ fontSize: '20px', fontWeight: 700, fontFamily: 'var(--font-mono)', color: streak >= 7 ? 'var(--accent)' : 'var(--text)' }}>🔥 {streak}</div>
-                <div style={{ fontSize: '11px', color: 'var(--text-muted)', textTransform: 'uppercase' }}>Day Streak</div>
+              <div style={{ color: 'var(--text-muted)', fontSize: 13, marginTop: 4, display: 'flex', gap: 16, flexWrap: 'wrap' }}>
+                {profile.phone && <span>📞 {profile.phone}</span>}
+                {profile.address_area && <span>📍 {profile.address_area}</span>}
+                {profile.physician_name && <span>👨‍⚕️ Dr. {profile.physician_name}</span>}
               </div>
             </div>
+            <div style={{ textAlign: 'center', padding: '8px 16px', background: streak >= 7 ? 'rgba(62,207,142,0.1)' : 'var(--surface2)', borderRadius: 10, border: `1px solid ${streak >= 7 ? 'var(--accent)' : 'var(--border)'}` }}>
+              <div style={{ fontSize: 20, fontWeight: 700, fontFamily: 'var(--font-mono)', color: streak >= 7 ? 'var(--accent)' : 'var(--text)' }}>🔥 {streak}</div>
+              <div style={{ fontSize: 11, color: 'var(--text-muted)', textTransform: 'uppercase' }}>Day Streak</div>
+            </div>
           </div>
-          {profile.notes && <div style={{ marginTop: '12px', padding: '10px 14px', background: 'var(--surface2)', borderRadius: 8, fontSize: '13px', color: 'var(--text-muted)' }}>📋 {profile.notes}</div>}
+          {profile.notes && <div style={{ marginTop: 12, padding: '10px 14px', background: 'var(--surface2)', borderRadius: 8, fontSize: 13, color: 'var(--text-muted)' }}>📋 {profile.notes}</div>}
         </div>
 
-        {/* 4 stat cards matching screenshot */}
-        <div className="grid-4" style={{ marginBottom: '20px' }}>
-          <div className="stat-card">
-            <div className="stat-label">Avg RBS</div>
-            <div className="stat-value" style={{ fontSize: 32, color: 'var(--text)' }}>{avgRBS7 ?? '—'}</div>
-            <div className="stat-sub">mg/dL (7d)</div>
-          </div>
-          <div className="stat-card">
-            <div className="stat-label">Time in Range</div>
-            <div className="stat-value" style={{ fontSize: 32, color: tirPct >= 70 ? 'var(--accent)' : tirPct >= 50 ? 'var(--warning)' : 'var(--danger)' }}>{tirPct != null ? `${tirPct}%` : '—'}</div>
-            <div className="stat-sub">(70–180 mg/dL)</div>
-          </div>
-          <div className="stat-card">
-            <div className="stat-label">Range</div>
-            <div className="stat-value" style={{ fontSize: minRBS7 ? 24 : 32, color: 'var(--text)', paddingTop: minRBS7 ? 4 : 0 }}>{minRBS7 != null ? `${minRBS7}–${maxRBS7}` : '—'}</div>
-            <div className="stat-sub">mg/dL (7d)</div>
-          </div>
-          <div className="stat-card">
-            <div className="stat-label">Hypo Events</div>
-            <div className="stat-value" style={{ fontSize: 32, color: hypoEvents7 > 0 ? 'var(--danger)' : 'var(--accent)' }}>{hypoEvents7}</div>
-            <div className="stat-sub">7 days</div>
-          </div>
+        {/* Stats */}
+        <div className="grid-4" style={{ marginBottom: 20 }}>
+          {[
+            { label: 'Avg RBS', val: avgRBS7 ?? '—', sub: 'mg/dL (7d)', color: 'var(--text)' },
+            { label: 'Time in Range', val: tirPct != null ? `${tirPct}%` : '—', sub: '70–180 mg/dL', color: tirPct >= 70 ? 'var(--accent)' : tirPct >= 50 ? 'var(--warning)' : 'var(--danger)' },
+            { label: 'Range', val: minRBS7 != null ? `${minRBS7}–${maxRBS7}` : '—', sub: 'mg/dL (7d)', color: 'var(--text)', small: true },
+            { label: 'Hypo Events', val: hypoEvents7, sub: '7 days', color: hypoEvents7 > 0 ? 'var(--danger)' : 'var(--accent)' },
+          ].map(s => (
+            <div key={s.label} className="stat-card">
+              <div className="stat-label">{s.label}</div>
+              <div className="stat-value" style={{ fontSize: s.small ? 22 : 28, color: s.color, paddingTop: s.small ? 4 : 0 }}>{s.val}</div>
+              <div className="stat-sub">{s.sub}</div>
+            </div>
+          ))}
         </div>
 
         {/* Tabs */}
-        <div style={{ display: 'flex', gap: '4px', marginBottom: '20px', background: 'var(--surface)', border: '1px solid var(--border)', borderRadius: 'var(--radius-sm)', padding: '4px', width: 'fit-content', flexWrap: 'wrap' }}>
+        <div style={{ display: 'flex', gap: 4, marginBottom: 20, background: 'var(--surface)', border: '1px solid var(--border)', borderRadius: 'var(--radius-sm)', padding: 4, flexWrap: 'wrap' }}>
           {[
             { key: 'overview', label: '📊 Overview' },
             { key: 'logs', label: '📋 All Logs' },
@@ -300,10 +295,10 @@ export default function PatientDetail() {
         {activeTab === 'overview' && (
           <div style={{ display: 'flex', flexDirection: 'column', gap: 20 }}>
 
-            {/* Glucose trend chart — matching screenshot style */}
+            {/* Glucose trend chart with toggleable lines */}
             <div className="card">
-              <div style={{ display: 'flex', justifyContent: 'space-between', alignItems: 'center', marginBottom: 20, flexWrap: 'wrap', gap: 12 }}>
-                <h2 style={{ fontSize: '17px', fontWeight: 700 }}>{chartDays}-Day Glucose Trend</h2>
+              <div style={{ display: 'flex', justifyContent: 'space-between', alignItems: 'center', marginBottom: 16, flexWrap: 'wrap', gap: 12 }}>
+                <h2 style={{ fontSize: 17, fontWeight: 700 }}>{chartDays}-Day Glucose Trend</h2>
                 <div style={{ display: 'flex', gap: 6 }}>
                   {[7, 14, 30].map(d => (
                     <button key={d} onClick={() => setChartDays(d)} style={{
@@ -315,27 +310,35 @@ export default function PatientDetail() {
                   ))}
                 </div>
               </div>
+
+              {/* Line toggles */}
+              <div style={{ display: 'flex', flexWrap: 'wrap', gap: 8, marginBottom: 16 }}>
+                {TIME_POINT_LINES.map(tp => (
+                  <button key={tp.key} onClick={() => setVisibleLines(v => ({ ...v, [tp.key]: !v[tp.key] }))} style={{
+                    padding: '4px 12px', borderRadius: 20, border: `1px solid ${visibleLines[tp.key] ? tp.color : 'var(--border)'}`,
+                    background: visibleLines[tp.key] ? `${tp.color}22` : 'var(--surface2)',
+                    color: visibleLines[tp.key] ? tp.color : 'var(--text-dim)',
+                    fontSize: 12, fontFamily: 'var(--font)', cursor: 'pointer', transition: 'all 0.15s'
+                  }}>{tp.label}</button>
+                ))}
+              </div>
+
               {chartData.length < 2 ? (
-                <p style={{ color: 'var(--text-muted)', fontSize: 14 }}>Not enough data for a trend yet.</p>
+                <p style={{ color: 'var(--text-muted)', fontSize: 14 }}>Not enough data yet.</p>
               ) : (
-                <ResponsiveContainer width="100%" height={260}>
+                <ResponsiveContainer width="100%" height={280}>
                   <LineChart data={chartData} margin={{ top: 10, right: 20, left: 0, bottom: 5 }}>
-                    <CartesianGrid strokeDasharray="4 4" stroke={gridColor} vertical={true} />
+                    <CartesianGrid strokeDasharray="4 4" stroke={gridColor} />
                     <XAxis dataKey="date" tick={{ fontSize: 12, fill: axisColor }} axisLine={false} tickLine={false} />
-                    <YAxis tick={{ fontSize: 12, fill: axisColor }} axisLine={false} tickLine={false} domain={[40, 'auto']} ticks={[70, 130, 190, 250, 300]} />
+                    <YAxis tick={{ fontSize: 12, fill: axisColor }} axisLine={false} tickLine={false} domain={[40, 'auto']} />
                     <Tooltip content={<CustomTooltip />} />
                     <ReferenceLine y={70} stroke="#60a5fa" strokeDasharray="4 4" strokeWidth={1.5} />
                     <ReferenceLine y={180} stroke="#f87171" strokeDasharray="4 4" strokeWidth={1.5} />
-                    <Line type="monotone" dataKey="AM RBS" stroke="#6366f1" strokeWidth={2.5}
-                      dot={{ r: 5, fill: '#fff', stroke: '#6366f1', strokeWidth: 2.5 }}
-                      activeDot={{ r: 7 }} connectNulls />
-                    <Line type="monotone" dataKey="PM RBS" stroke="#f59e0b" strokeWidth={2.5}
-                      dot={{ r: 5, fill: '#fff', stroke: '#f59e0b', strokeWidth: 2.5 }}
-                      activeDot={{ r: 7 }} connectNulls />
-                    <Legend
-                      wrapperStyle={{ fontSize: 13, paddingTop: 16 }}
-                      formatter={(value) => <span style={{ color: value === 'AM RBS' ? '#6366f1' : '#f59e0b', fontWeight: 600 }}>{value}</span>}
-                    />
+                    {TIME_POINT_LINES.map(tp => visibleLines[tp.key] && (
+                      <Line key={tp.key} type="monotone" dataKey={tp.label} stroke={tp.color} strokeWidth={2.5}
+                        dot={{ r: 4, fill: '#fff', stroke: tp.color, strokeWidth: 2 }}
+                        activeDot={{ r: 6 }} connectNulls />
+                    ))}
                   </LineChart>
                 </ResponsiveContainer>
               )}
@@ -343,14 +346,40 @@ export default function PatientDetail() {
 
             {/* Time in range */}
             <div className="card">
-              <h2 style={{ fontSize: '16px', fontWeight: 600, marginBottom: '20px' }}>Time in Range — All Time</h2>
+              <h2 style={{ fontSize: 16, fontWeight: 600, marginBottom: 20 }}>Time in Range — All Time</h2>
               <TimeInRangeChart logs={logs} />
             </div>
+
+            {/* Hypo symptom summary */}
+            {hypoLogs.length > 0 && (
+              <div className="card">
+                <h2 style={{ fontSize: 16, fontWeight: 600, marginBottom: 16 }}>⚡ Hypoglycaemia Events</h2>
+                <div className="table-wrap">
+                  <table>
+                    <thead><tr><th>Date</th><th>Symptoms</th><th>RBS at time</th></tr></thead>
+                    <tbody>
+                      {hypoLogs.slice(-10).reverse().map(log => {
+                        const lowestRBS = Math.min(...TIME_POINT_LINES.map(tp => log[tp.key]).filter(Boolean))
+                        return (
+                          <tr key={log.id}>
+                            <td style={{ fontFamily: 'var(--font-mono)', fontSize: 13 }}>{format(parseISO(log.log_date), 'dd MMM yyyy')}</td>
+                            <td style={{ fontSize: 13, color: 'var(--danger)' }}>{log.hypo_symptoms}</td>
+                            <td style={{ fontFamily: 'var(--font-mono)', fontSize: 13, color: lowestRBS < 70 ? 'var(--danger)' : 'var(--text)' }}>
+                              {isFinite(lowestRBS) ? lowestRBS : '—'}
+                            </td>
+                          </tr>
+                        )
+                      })}
+                    </tbody>
+                  </table>
+                </div>
+              </div>
+            )}
 
             {/* Latest HbA1c */}
             {hba1cLogs.length > 0 && (
               <div className="card">
-                <h2 style={{ fontSize: '16px', fontWeight: 600, marginBottom: '16px' }}>Latest HbA1c</h2>
+                <h2 style={{ fontSize: 16, fontWeight: 600, marginBottom: 16 }}>Latest HbA1c</h2>
                 <div style={{ display: 'flex', gap: 16, flexWrap: 'wrap' }}>
                   {[...hba1cLogs].slice(-3).reverse().map(h => (
                     <div key={h.id} style={{ padding: '16px 20px', background: 'var(--surface2)', borderRadius: 10, border: '1px solid var(--border)', minWidth: 120 }}>
@@ -368,28 +397,45 @@ export default function PatientDetail() {
         {/* LOGS */}
         {activeTab === 'logs' && (
           <div className="card">
-            <div style={{ display: 'flex', justifyContent: 'space-between', alignItems: 'center', marginBottom: 20 }}>
-              <h2 style={{ fontSize: '16px', fontWeight: 600 }}>All Logs <span style={{ fontSize: 13, fontWeight: 400, color: 'var(--text-muted)' }}>{logs.length} entries</span></h2>
-            </div>
+            <h2 style={{ fontSize: 16, fontWeight: 600, marginBottom: 20 }}>All Logs <span style={{ fontSize: 13, fontWeight: 400, color: 'var(--text-muted)' }}>{logs.length} entries</span></h2>
             {logs.length === 0 ? <p style={{ color: 'var(--text-muted)', fontSize: 14 }}>No logs yet.</p> : (
               <div className="table-wrap">
                 <table>
-                  <thead><tr><th>Date</th><th>AM RBS</th><th>AM Insulin</th><th>PM RBS</th><th>PM Insulin</th><th>Missed</th><th>Notes</th></tr></thead>
+                  <thead>
+                    <tr>
+                      <th>Date</th>
+                      <th>Fasting</th>
+                      <th>AM</th>
+                      <th>Pre-Lunch</th>
+                      <th>Pre-Dinner</th>
+                      <th>PM</th>
+                      <th>Bedtime</th>
+                      <th>Hypo Sx</th>
+                      <th>Exercise</th>
+                      <th>Missed</th>
+                    </tr>
+                  </thead>
                   <tbody>
                     {[...logs].reverse().map(log => {
-                      const amB = rbsBadge(log.am_rbs); const pmB = rbsBadge(log.pm_rbs)
-                      const amInsulin = isNPH ? [log.am_n_dose&&`N ${log.am_n_dose}u`,log.am_r_dose&&`R ${log.am_r_dose}u`].filter(Boolean).join(' / ') : [log.am_basal&&`Basal ${log.am_basal}u`,log.am_bolus&&`Bolus ${log.am_bolus}u`].filter(Boolean).join(' / ')
-                      const pmInsulin = isNPH ? [log.pm_n_dose&&`N ${log.pm_n_dose}u`,log.pm_r_dose&&`R ${log.pm_r_dose}u`].filter(Boolean).join(' / ') : [log.pm_basal&&`Basal ${log.pm_basal}u`,log.pm_bolus&&`Bolus ${log.pm_bolus}u`].filter(Boolean).join(' / ')
-                      const missedFlag = [log.missed_am_dose&&'AM',log.missed_pm_dose&&'PM'].filter(Boolean).join(', ')
+                      const tpFields = [log.fasting_rbs, log.am_rbs, log.pre_lunch_rbs, log.pre_dinner_rbs, log.pm_rbs, log.bedtime_rbs]
+                      const missed = [log.missed_am_dose && 'AM', log.missed_lunch_dose && 'Lunch', log.missed_dinner_dose && 'Dinner', log.missed_pm_dose && 'PM', log.missed_bedtime_dose && 'Bedtime'].filter(Boolean).join(', ')
                       return (
                         <tr key={log.id}>
                           <td style={{ fontFamily: 'var(--font-mono)', fontSize: 13 }}>{format(parseISO(log.log_date), 'dd MMM yyyy')}</td>
-                          <td>{log.am_rbs ? <div style={{ display:'flex',alignItems:'center',gap:8 }}><span style={{fontFamily:'var(--font-mono)'}}>{log.am_rbs}</span>{amB&&<span className={`badge ${amB.cls}`}>{amB.label}</span>}</div> : <span style={{color:'var(--text-dim)'}}>—</span>}</td>
-                          <td style={{ fontSize:13,color:'var(--text-muted)' }}>{amInsulin||'—'}</td>
-                          <td>{log.pm_rbs ? <div style={{ display:'flex',alignItems:'center',gap:8 }}><span style={{fontFamily:'var(--font-mono)'}}>{log.pm_rbs}</span>{pmB&&<span className={`badge ${pmB.cls}`}>{pmB.label}</span>}</div> : <span style={{color:'var(--text-dim)'}}>—</span>}</td>
-                          <td style={{ fontSize:13,color:'var(--text-muted)' }}>{pmInsulin||'—'}</td>
-                          <td>{missedFlag ? <span className="badge badge-warn">⚠️ {missedFlag}</span> : <span style={{color:'var(--text-dim)'}}>—</span>}</td>
-                          <td style={{ fontSize:13,color:'var(--text-muted)',maxWidth:160 }}>{log.notes||'—'}</td>
+                          {tpFields.map((val, i) => {
+                            const b = rbsBadge(val)
+                            return (
+                              <td key={i}>
+                                {val ? <div style={{ display: 'flex', alignItems: 'center', gap: 6 }}>
+                                  <span style={{ fontFamily: 'var(--font-mono)', fontSize: 13 }}>{val}</span>
+                                  {b && <span className={`badge ${b.cls}`} style={{ fontSize: 10, padding: '1px 6px' }}>{b.label}</span>}
+                                </div> : <span style={{ color: 'var(--text-dim)' }}>—</span>}
+                              </td>
+                            )
+                          })}
+                          <td style={{ fontSize: 12, color: 'var(--danger)', maxWidth: 140 }}>{log.hypo_symptoms || '—'}</td>
+                          <td style={{ fontSize: 12, color: 'var(--text-muted)', maxWidth: 140 }}>{log.exercise_notes || '—'}</td>
+                          <td>{missed ? <span className="badge badge-warn" style={{ fontSize: 11 }}>⚠️ {missed}</span> : <span style={{ color: 'var(--text-dim)' }}>—</span>}</td>
                         </tr>
                       )
                     })}
@@ -404,53 +450,53 @@ export default function PatientDetail() {
         {activeTab === 'hba1c' && (
           <div style={{ display: 'flex', flexDirection: 'column', gap: 20 }}>
             <div className="card">
-              <h2 style={{ fontSize: '16px', fontWeight: 600, marginBottom: '16px' }}>Record HbA1c</h2>
+              <h2 style={{ fontSize: 16, fontWeight: 600, marginBottom: 16 }}>Record HbA1c</h2>
               {hba1cMsg && <div className={`alert ${hba1cMsg.startsWith('Error') ? 'alert-error' : 'alert-success'}`} style={{ marginBottom: 12 }}>{hba1cMsg}</div>}
-              <form onSubmit={saveHba1c} style={{ display:'flex',gap:12,flexWrap:'wrap',alignItems:'flex-end' }}>
-                <div className="field" style={{ minWidth:160 }}>
+              <form onSubmit={saveHba1c} style={{ display: 'flex', gap: 12, flexWrap: 'wrap', alignItems: 'flex-end' }}>
+                <div className="field" style={{ minWidth: 160 }}>
                   <label>Date</label>
-                  <input className="input" type="date" value={hba1cForm.recorded_date} onChange={e=>setHba1cForm(f=>({...f,recorded_date:e.target.value}))} required />
+                  <input className="input" type="date" value={hba1cForm.recorded_date} onChange={e => setHba1cForm(f => ({ ...f, recorded_date: e.target.value }))} required />
                 </div>
-                <div className="field" style={{ minWidth:120 }}>
+                <div className="field" style={{ minWidth: 120 }}>
                   <label>HbA1c (%)</label>
-                  <input className="input" type="number" step="0.1" min="4" max="20" placeholder="e.g. 7.5" value={hba1cForm.hba1c_percent} onChange={e=>setHba1cForm(f=>({...f,hba1c_percent:e.target.value}))} required />
+                  <input className="input" type="number" step="0.1" min="4" max="20" placeholder="e.g. 7.5" value={hba1cForm.hba1c_percent} onChange={e => setHba1cForm(f => ({ ...f, hba1c_percent: e.target.value }))} required />
                 </div>
-                <div className="field" style={{ flex:1,minWidth:200 }}>
+                <div className="field" style={{ flex: 1, minWidth: 200 }}>
                   <label>Notes (optional)</label>
-                  <input className="input" placeholder="e.g. pre-clinic check" value={hba1cForm.notes} onChange={e=>setHba1cForm(f=>({...f,notes:e.target.value}))} />
+                  <input className="input" placeholder="e.g. pre-clinic" value={hba1cForm.notes} onChange={e => setHba1cForm(f => ({ ...f, notes: e.target.value }))} />
                 </div>
-                <button className="btn btn-primary" type="submit" disabled={savingHba1c}>{savingHba1c?'Saving…':'+ Add'}</button>
+                <button className="btn btn-primary" type="submit" disabled={savingHba1c}>{savingHba1c ? 'Saving…' : '+ Add'}</button>
               </form>
             </div>
             {hba1cChartData.length > 1 && (
               <div className="card">
-                <h2 style={{ fontSize:'16px',fontWeight:600,marginBottom:20 }}>HbA1c Trend</h2>
+                <h2 style={{ fontSize: 16, fontWeight: 600, marginBottom: 20 }}>HbA1c Trend</h2>
                 <ResponsiveContainer width="100%" height={220}>
-                  <LineChart data={hba1cChartData} margin={{ top:5,right:20,left:0,bottom:5 }}>
+                  <LineChart data={hba1cChartData} margin={{ top: 5, right: 20, left: 0, bottom: 5 }}>
                     <CartesianGrid strokeDasharray="4 4" stroke={gridColor} />
-                    <XAxis dataKey="date" tick={{ fontSize:12,fill:axisColor }} axisLine={false} tickLine={false} />
-                    <YAxis tick={{ fontSize:12,fill:axisColor }} axisLine={false} tickLine={false} domain={[4,12]} />
-                    <Tooltip content={<CustomTooltip />} />
-                    <ReferenceLine y={7} stroke="var(--accent)" strokeDasharray="4 4" label={{ value:'Target 7%',fill:'var(--accent)',fontSize:11 }} />
+                    <XAxis dataKey="date" tick={{ fontSize: 12, fill: axisColor }} axisLine={false} tickLine={false} />
+                    <YAxis tick={{ fontSize: 12, fill: axisColor }} axisLine={false} tickLine={false} domain={[4, 12]} />
+                    <Tooltip />
+                    <ReferenceLine y={7} stroke="var(--accent)" strokeDasharray="4 4" label={{ value: 'Target 7%', fill: 'var(--accent)', fontSize: 11 }} />
                     <ReferenceLine y={8} stroke="var(--danger)" strokeDasharray="4 4" />
-                    <Line type="monotone" dataKey="HbA1c" stroke="var(--warning)" strokeWidth={2.5} dot={{ r:5,fill:'#fff',stroke:'var(--warning)',strokeWidth:2.5 }} />
+                    <Line type="monotone" dataKey="HbA1c" stroke="var(--warning)" strokeWidth={2.5} dot={{ r: 5, fill: '#fff', stroke: 'var(--warning)', strokeWidth: 2.5 }} />
                   </LineChart>
                 </ResponsiveContainer>
               </div>
             )}
             {hba1cLogs.length > 0 && (
               <div className="card">
-                <h2 style={{ fontSize:'16px',fontWeight:600,marginBottom:16 }}>HbA1c History</h2>
+                <h2 style={{ fontSize: 16, fontWeight: 600, marginBottom: 16 }}>HbA1c History</h2>
                 <div className="table-wrap">
                   <table>
                     <thead><tr><th>Date</th><th>HbA1c</th><th>Status</th><th>Notes</th></tr></thead>
                     <tbody>
                       {[...hba1cLogs].reverse().map(h => (
                         <tr key={h.id}>
-                          <td style={{ fontFamily:'var(--font-mono)',fontSize:13 }}>{format(parseISO(h.recorded_date),'dd MMM yyyy')}</td>
-                          <td style={{ fontFamily:'var(--font-mono)',fontWeight:600,color:h.hba1c_percent>8?'var(--danger)':h.hba1c_percent>7?'var(--warning)':'var(--accent)' }}>{h.hba1c_percent}%</td>
-                          <td><span className={`badge ${h.hba1c_percent>8?'badge-high':h.hba1c_percent>7?'badge-warn':'badge-normal'}`}>{h.hba1c_percent>8?'Poor':h.hba1c_percent>7?'Borderline':'Good'}</span></td>
-                          <td style={{ fontSize:13,color:'var(--text-muted)' }}>{h.notes||'—'}</td>
+                          <td style={{ fontFamily: 'var(--font-mono)', fontSize: 13 }}>{format(parseISO(h.recorded_date), 'dd MMM yyyy')}</td>
+                          <td style={{ fontFamily: 'var(--font-mono)', fontWeight: 600, color: h.hba1c_percent > 8 ? 'var(--danger)' : h.hba1c_percent > 7 ? 'var(--warning)' : 'var(--accent)' }}>{h.hba1c_percent}%</td>
+                          <td><span className={`badge ${h.hba1c_percent > 8 ? 'badge-high' : h.hba1c_percent > 7 ? 'badge-warn' : 'badge-normal'}`}>{h.hba1c_percent > 8 ? 'Poor' : h.hba1c_percent > 7 ? 'Borderline' : 'Good'}</span></td>
+                          <td style={{ fontSize: 13, color: 'var(--text-muted)' }}>{h.notes || '—'}</td>
                         </tr>
                       ))}
                     </tbody>
@@ -461,35 +507,35 @@ export default function PatientDetail() {
           </div>
         )}
 
-        {/* CLINICAL NOTES */}
+        {/* NOTES */}
         {activeTab === 'notes' && (
-          <div style={{ display:'flex',flexDirection:'column',gap:20 }}>
+          <div style={{ display: 'flex', flexDirection: 'column', gap: 20 }}>
             <div className="card">
-              <h2 style={{ fontSize:'16px',fontWeight:600,marginBottom:16 }}>Add Clinical Note</h2>
-              {noteMsg && <div className={`alert ${noteMsg.startsWith('Error')?'alert-error':'alert-success'}`} style={{ marginBottom:12 }}>{noteMsg}</div>}
-              <form onSubmit={saveNote} style={{ display:'flex',flexDirection:'column',gap:12 }}>
-                <div className="field" style={{ maxWidth:200 }}>
+              <h2 style={{ fontSize: 16, fontWeight: 600, marginBottom: 16 }}>Add Clinical Note</h2>
+              {noteMsg && <div className={`alert ${noteMsg.startsWith('Error') ? 'alert-error' : 'alert-success'}`} style={{ marginBottom: 12 }}>{noteMsg}</div>}
+              <form onSubmit={saveNote} style={{ display: 'flex', flexDirection: 'column', gap: 12 }}>
+                <div className="field" style={{ maxWidth: 200 }}>
                   <label>Visit Date</label>
-                  <input className="input" type="date" value={noteForm.note_date} onChange={e=>setNoteForm(f=>({...f,note_date:e.target.value}))} required />
+                  <input className="input" type="date" value={noteForm.note_date} onChange={e => setNoteForm(f => ({ ...f, note_date: e.target.value }))} required />
                 </div>
                 <div className="field">
                   <label>Note</label>
-                  <textarea className="input" rows={4} placeholder="Clinical observations, dose adjustments, patient concerns, plan…" value={noteForm.note} onChange={e=>setNoteForm(f=>({...f,note:e.target.value}))} style={{ resize:'vertical' }} required />
+                  <textarea className="input" rows={4} placeholder="Clinical observations, dose adjustments, patient concerns, plan…" value={noteForm.note} onChange={e => setNoteForm(f => ({ ...f, note: e.target.value }))} style={{ resize: 'vertical' }} required />
                 </div>
-                <button className="btn btn-primary" type="submit" disabled={savingNote} style={{ alignSelf:'flex-start' }}>{savingNote?'Saving…':'+ Add Note'}</button>
+                <button className="btn btn-primary" type="submit" disabled={savingNote} style={{ alignSelf: 'flex-start' }}>{savingNote ? 'Saving…' : '+ Add Note'}</button>
               </form>
             </div>
             {clinicalNotes.length === 0 ? (
-              <div className="card"><p style={{ color:'var(--text-muted)',fontSize:14 }}>No clinical notes yet.</p></div>
+              <div className="card"><p style={{ color: 'var(--text-muted)', fontSize: 14 }}>No clinical notes yet.</p></div>
             ) : (
-              <div style={{ display:'flex',flexDirection:'column',gap:12 }}>
+              <div style={{ display: 'flex', flexDirection: 'column', gap: 12 }}>
                 {clinicalNotes.map(note => (
                   <div key={note.id} className="card">
-                    <div style={{ display:'flex',justifyContent:'space-between',marginBottom:10 }}>
-                      <span style={{ fontSize:13,fontWeight:600,color:'var(--accent)',fontFamily:'var(--font-mono)' }}>{format(parseISO(note.note_date),'dd MMM yyyy')}</span>
-                      <button className="btn btn-danger btn-sm" onClick={()=>deleteNote(note.id)}>Delete</button>
+                    <div style={{ display: 'flex', justifyContent: 'space-between', marginBottom: 10 }}>
+                      <span style={{ fontSize: 13, fontWeight: 600, color: 'var(--accent)', fontFamily: 'var(--font-mono)' }}>{format(parseISO(note.note_date), 'dd MMM yyyy')}</span>
+                      <button className="btn btn-danger btn-sm" onClick={() => deleteNote(note.id)}>Delete</button>
                     </div>
-                    <p style={{ fontSize:14,lineHeight:1.7,color:'var(--text)',whiteSpace:'pre-wrap' }}>{note.note}</p>
+                    <p style={{ fontSize: 14, lineHeight: 1.7, color: 'var(--text)', whiteSpace: 'pre-wrap' }}>{note.note}</p>
                   </div>
                 ))}
               </div>
