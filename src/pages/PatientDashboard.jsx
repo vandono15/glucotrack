@@ -1,4 +1,4 @@
-import { useState, useEffect } from 'react'
+import { useState, useEffect, useCallback } from 'react'
 import { supabase } from '../lib/supabase'
 import { ThemeToggle } from '../lib/theme.jsx'
 import ChangePasswordModal from '../components/ChangePasswordModal.jsx'
@@ -11,15 +11,6 @@ const REGIMEN_LABELS = {
   pump_csii: 'CSII Pump',
   other: 'Other',
 }
-
-const TIME_POINTS = [
-  { key: 'fasting', label: '🌅 Fasting (Pre-Breakfast)', color: 'var(--accent)' },
-  { key: 'am', label: '☀️ Morning (AM)', color: '#60a5fa' },
-  { key: 'pre_lunch', label: '🕛 Pre-Lunch', color: 'var(--warning)' },
-  { key: 'pre_dinner', label: '🌆 Pre-Dinner', color: '#f97316' },
-  { key: 'pm', label: '🌙 Evening (PM)', color: '#a78bfa' },
-  { key: 'bedtime', label: '🌛 Bedtime', color: '#ec4899' },
-]
 
 function rbsStatus(val) {
   if (!val) return null
@@ -43,6 +34,106 @@ function calcStreak(logs) {
 
 const HYPO_SYMPTOMS = ['Shakiness', 'Sweating', 'Dizziness', 'Headache', 'Confusion', 'Palpitations', 'Hunger', 'Blurred vision']
 
+// ── These components are defined OUTSIDE PatientDashboard so they never remount on state change ──
+
+function RBSInput({ value, onChange, placeholder }) {
+  return (
+    <input
+      className="input"
+      type="text"
+      inputMode="numeric"
+      pattern="[0-9]*"
+      placeholder={placeholder || 'e.g. 120'}
+      value={value}
+      onChange={onChange}
+    />
+  )
+}
+
+function DoseInput({ value, onChange, placeholder }) {
+  return (
+    <input
+      className="input"
+      type="text"
+      inputMode="decimal"
+      placeholder={placeholder || '0'}
+      value={value}
+      onChange={onChange}
+    />
+  )
+}
+
+function TimePointSection({ label, color, rbsField, nField, rField, basalField, bolusField, missedField, missedLabel, form, onChange, onToggle, regimen }) {
+  const isNPH = regimen === 'nph_regular' || regimen === 'premixed_70_30' || !regimen
+  const isBasalBolus = regimen === 'basal_bolus'
+  const isPump = regimen === 'pump_csii'
+
+  return (
+    <div style={{ border: '1px solid var(--border)', borderRadius: 10, padding: 16, background: 'var(--surface2)' }}>
+      <div style={{ fontSize: 13, fontWeight: 600, color, textTransform: 'uppercase', letterSpacing: '0.05em', marginBottom: 12 }}>{label}</div>
+      <div className="grid-2" style={{ marginBottom: 12 }}>
+        <div className="field">
+          <label>RBS (mg/dL)</label>
+          <RBSInput value={form[rbsField]} onChange={e => onChange(rbsField, e.target.value)} />
+        </div>
+        <div />
+      </div>
+      {(nField || basalField) && (
+        <div className="grid-2" style={{ marginBottom: 12 }}>
+          {isNPH && nField && (
+            <>
+              <div className="field">
+                <label>N Dose (units)</label>
+                <DoseInput value={form[nField]} onChange={e => onChange(nField, e.target.value)} placeholder="NPH" />
+              </div>
+              {rField && (
+                <div className="field">
+                  <label>R Dose (units)</label>
+                  <DoseInput value={form[rField]} onChange={e => onChange(rField, e.target.value)} placeholder="Regular" />
+                </div>
+              )}
+            </>
+          )}
+          {isBasalBolus && basalField && (
+            <>
+              <div className="field">
+                <label>Basal (units)</label>
+                <DoseInput value={form[basalField]} onChange={e => onChange(basalField, e.target.value)} />
+              </div>
+              {bolusField && (
+                <div className="field">
+                  <label>Bolus (units)</label>
+                  <DoseInput value={form[bolusField]} onChange={e => onChange(bolusField, e.target.value)} />
+                </div>
+              )}
+            </>
+          )}
+          {isPump && basalField && (
+            <>
+              <div className="field">
+                <label>Basal (u/hr)</label>
+                <DoseInput value={form[basalField]} onChange={e => onChange(basalField, e.target.value)} />
+              </div>
+              {bolusField && (
+                <div className="field">
+                  <label>Bolus (units)</label>
+                  <DoseInput value={form[bolusField]} onChange={e => onChange(bolusField, e.target.value)} />
+                </div>
+              )}
+            </>
+          )}
+        </div>
+      )}
+      {missedField && (
+        <label style={{ display: 'flex', alignItems: 'center', gap: 10, cursor: 'pointer', fontSize: 14, color: form[missedField] ? 'var(--warning)' : 'var(--text-muted)' }}>
+          <input type="checkbox" checked={form[missedField]} onChange={() => onToggle(missedField)} style={{ width: 16, height: 16, accentColor: 'var(--warning)' }} />
+          ⚠️ {missedLabel}
+        </label>
+      )}
+    </div>
+  )
+}
+
 export default function PatientDashboard() {
   const [profile, setProfile] = useState(null)
   const [logs, setLogs] = useState([])
@@ -54,31 +145,22 @@ export default function PatientDashboard() {
   const [showChangePassword, setShowChangePassword] = useState(false)
 
   const today = format(new Date(), 'yyyy-MM-dd')
-  const emptyForm = {
+
+  const [form, setForm] = useState({
     log_date: today,
-    // RBS per time point
     fasting_rbs: '', am_rbs: '', pre_lunch_rbs: '', pre_dinner_rbs: '', pm_rbs: '', bedtime_rbs: '',
-    // Fasting doses
     fasting_n_dose: '', fasting_r_dose: '', fasting_basal: '', fasting_bolus: '',
-    // AM doses
     am_n_dose: '', am_r_dose: '', am_basal: '', am_bolus: '',
-    // Lunch doses
     lunch_n_dose: '', lunch_r_dose: '', lunch_basal: '', lunch_bolus: '',
-    // Dinner doses
     dinner_n_dose: '', dinner_r_dose: '', dinner_basal: '', dinner_bolus: '',
-    // PM doses
     pm_n_dose: '', pm_r_dose: '', pm_basal: '', pm_bolus: '',
-    // Bedtime doses
     bedtime_n_dose: '', bedtime_basal: '',
-    // Missed doses
     missed_am_dose: false, missed_pm_dose: false,
     missed_lunch_dose: false, missed_dinner_dose: false, missed_bedtime_dose: false,
-    // Symptoms & activity
     exercise_notes: '',
     hypo_symptoms: [],
     notes: ''
-  }
-  const [form, setForm] = useState(emptyForm)
+  })
 
   useEffect(() => { fetchData() }, [])
 
@@ -93,13 +175,15 @@ export default function PatientDashboard() {
     setLoading(false)
   }
 
-  function set(field) {
-  return e => {
-    const val = e.target.value
-    setForm(f => ({ ...f, [field]: val }))
-  }
-}
-  function toggle(field) { return () => setForm(f => ({ ...f, [field]: !f[field] })) }
+  // Stable onChange handler — does NOT recreate on every render
+  const handleFieldChange = useCallback((field, value) => {
+    setForm(f => ({ ...f, [field]: value }))
+  }, [])
+
+  const handleToggle = useCallback((field) => {
+    setForm(f => ({ ...f, [field]: !f[field] }))
+  }, [])
+
   function toggleHypo(symptom) {
     setForm(f => ({
       ...f,
@@ -114,51 +198,28 @@ export default function PatientDashboard() {
     setSaving(true); setError(''); setSuccess('')
     const { data: { user } } = await supabase.auth.getUser()
 
+    const n = v => parseFloat(v) || null
+
     const payload = {
       patient_id: user.id,
       log_date: form.log_date,
-      // RBS
-      fasting_rbs: parseFloat(form.fasting_rbs) || null,
-      am_rbs: parseFloat(form.am_rbs) || null,
-      pre_lunch_rbs: parseFloat(form.pre_lunch_rbs) || null,
-      pre_dinner_rbs: parseFloat(form.pre_dinner_rbs) || null,
-      pm_rbs: parseFloat(form.pm_rbs) || null,
-      bedtime_rbs: parseFloat(form.bedtime_rbs) || null,
-      // Fasting doses
-      fasting_n_dose: parseFloat(form.fasting_n_dose) || null,
-      fasting_r_dose: parseFloat(form.fasting_r_dose) || null,
-      fasting_basal: parseFloat(form.fasting_basal) || null,
-      fasting_bolus: parseFloat(form.fasting_bolus) || null,
-      // AM doses
-      am_n_dose: parseFloat(form.am_n_dose) || null,
-      am_r_dose: parseFloat(form.am_r_dose) || null,
-      am_basal: parseFloat(form.am_basal) || null,
-      am_bolus: parseFloat(form.am_bolus) || null,
-      // Lunch doses
-      lunch_n_dose: parseFloat(form.lunch_n_dose) || null,
-      lunch_r_dose: parseFloat(form.lunch_r_dose) || null,
-      lunch_basal: parseFloat(form.lunch_basal) || null,
-      lunch_bolus: parseFloat(form.lunch_bolus) || null,
-      // Dinner doses
-      dinner_n_dose: parseFloat(form.dinner_n_dose) || null,
-      dinner_r_dose: parseFloat(form.dinner_r_dose) || null,
-      dinner_basal: parseFloat(form.dinner_basal) || null,
-      dinner_bolus: parseFloat(form.dinner_bolus) || null,
-      // PM doses
-      pm_n_dose: parseFloat(form.pm_n_dose) || null,
-      pm_r_dose: parseFloat(form.pm_r_dose) || null,
-      pm_basal: parseFloat(form.pm_basal) || null,
-      pm_bolus: parseFloat(form.pm_bolus) || null,
-      // Bedtime doses
-      bedtime_n_dose: parseFloat(form.bedtime_n_dose) || null,
-      bedtime_basal: parseFloat(form.bedtime_basal) || null,
-      // Missed
-      missed_am_dose: form.missed_am_dose,
-      missed_pm_dose: form.missed_pm_dose,
-      missed_lunch_dose: form.missed_lunch_dose,
-      missed_dinner_dose: form.missed_dinner_dose,
+      fasting_rbs: n(form.fasting_rbs), am_rbs: n(form.am_rbs),
+      pre_lunch_rbs: n(form.pre_lunch_rbs), pre_dinner_rbs: n(form.pre_dinner_rbs),
+      pm_rbs: n(form.pm_rbs), bedtime_rbs: n(form.bedtime_rbs),
+      fasting_n_dose: n(form.fasting_n_dose), fasting_r_dose: n(form.fasting_r_dose),
+      fasting_basal: n(form.fasting_basal), fasting_bolus: n(form.fasting_bolus),
+      am_n_dose: n(form.am_n_dose), am_r_dose: n(form.am_r_dose),
+      am_basal: n(form.am_basal), am_bolus: n(form.am_bolus),
+      lunch_n_dose: n(form.lunch_n_dose), lunch_r_dose: n(form.lunch_r_dose),
+      lunch_basal: n(form.lunch_basal), lunch_bolus: n(form.lunch_bolus),
+      dinner_n_dose: n(form.dinner_n_dose), dinner_r_dose: n(form.dinner_r_dose),
+      dinner_basal: n(form.dinner_basal), dinner_bolus: n(form.dinner_bolus),
+      pm_n_dose: n(form.pm_n_dose), pm_r_dose: n(form.pm_r_dose),
+      pm_basal: n(form.pm_basal), pm_bolus: n(form.pm_bolus),
+      bedtime_n_dose: n(form.bedtime_n_dose), bedtime_basal: n(form.bedtime_basal),
+      missed_am_dose: form.missed_am_dose, missed_pm_dose: form.missed_pm_dose,
+      missed_lunch_dose: form.missed_lunch_dose, missed_dinner_dose: form.missed_dinner_dose,
       missed_bedtime_dose: form.missed_bedtime_dose,
-      // Symptoms
       exercise_notes: form.exercise_notes || null,
       hypo_symptoms: form.hypo_symptoms.length > 0 ? form.hypo_symptoms.join(', ') : null,
       notes: form.notes || null,
@@ -172,53 +233,8 @@ export default function PatientDashboard() {
 
   async function handleSignOut() { await supabase.auth.signOut() }
 
-  const isNPH = profile?.regimen === 'nph_regular' || profile?.regimen === 'premixed_70_30' || !profile?.regimen
-  const isBasalBolus = profile?.regimen === 'basal_bolus'
-  const isPump = profile?.regimen === 'pump_csii'
   const streak = calcStreak(logs)
-
-  function DoseFields({ prefix, missed, missedLabel }) {
-    return (
-      <div style={{ display: 'flex', flexDirection: 'column', gap: 10 }}>
-        <div className="grid-2">
-          {isNPH && <>
-            <div className="field"><label>N Dose (units)</label><input className="input" type="number" step="0.5" placeholder="NPH" value={form[`${prefix}_n_dose`] || form[`${prefix}n_dose`] || ''} onChange={set(form[`${prefix}_n_dose`] !== undefined ? `${prefix}_n_dose` : `${prefix}n_dose`)} /></div>
-            <div className="field"><label>R Dose (units)</label><input className="input" type="number" step="0.5" placeholder="Regular" value={form[`${prefix}_r_dose`] || form[`${prefix}r_dose`] || ''} onChange={set(form[`${prefix}_r_dose`] !== undefined ? `${prefix}_r_dose` : `${prefix}r_dose`)} /></div>
-          </>}
-          {isBasalBolus && <>
-            <div className="field"><label>Basal (units)</label><input className="input" type="number" step="0.5" value={form[`${prefix}_basal`] || ''} onChange={set(`${prefix}_basal`)} /></div>
-            <div className="field"><label>Bolus (units)</label><input className="input" type="number" step="0.5" value={form[`${prefix}_bolus`] || ''} onChange={set(`${prefix}_bolus`)} /></div>
-          </>}
-          {isPump && <>
-            <div className="field"><label>Basal (u/hr)</label><input className="input" type="number" step="0.05" value={form[`${prefix}_basal`] || ''} onChange={set(`${prefix}_basal`)} /></div>
-            <div className="field"><label>Bolus (units)</label><input className="input" type="number" step="0.5" value={form[`${prefix}_bolus`] || ''} onChange={set(`${prefix}_bolus`)} /></div>
-          </>}
-        </div>
-        {missed && (
-          <label style={{ display: 'flex', alignItems: 'center', gap: 10, cursor: 'pointer', fontSize: 14, color: form[missed] ? 'var(--warning)' : 'var(--text-muted)' }}>
-            <input type="checkbox" checked={form[missed]} onChange={toggle(missed)} style={{ width: 16, height: 16, accentColor: 'var(--warning)' }} />
-            ⚠️ {missedLabel}
-          </label>
-        )}
-      </div>
-    )
-  }
-
-  function TimePointSection({ tpKey, label, color, rbsField, dosePrefix, missedKey, missedLabel }) {
-    return (
-      <div style={{ border: '1px solid var(--border)', borderRadius: 10, padding: 16, background: 'var(--surface2)' }}>
-        <div style={{ fontSize: 13, fontWeight: 600, color, textTransform: 'uppercase', letterSpacing: '0.05em', marginBottom: 12 }}>{label}</div>
-        <div className="grid-2" style={{ marginBottom: 12 }}>
-          <div className="field">
-            <label>RBS (mg/dL)</label>
-            <input className="input" type="text" inputMode="numeric" pattern="[0-9]*" placeholder="e.g. 120" value={form[rbsField]} onChange={set(rbsField)} />
-          </div>
-          <div />
-        </div>
-        <DoseFields prefix={dosePrefix} missed={missedKey} missedLabel={missedLabel} />
-      </div>
-    )
-  }
+  const regimen = profile?.regimen
 
   if (loading) return <div className="loading-screen"><div className="spinner" /></div>
 
@@ -294,64 +310,58 @@ export default function PatientDashboard() {
             {error && <div className="alert alert-error" style={{ marginBottom: 16 }}>{error}</div>}
             {success && <div className="alert alert-success" style={{ marginBottom: 16 }}>✓ {success}</div>}
 
-            <form onSubmit={handleSubmit} style={{ display: 'flex', flexDirection: 'column', gap: '20px' }}>
+            <form onSubmit={handleSubmit} style={{ display: 'flex', flexDirection: 'column', gap: '16px' }}>
               <div className="field" style={{ maxWidth: 200 }}>
                 <label>Date</label>
-                <input className="input" type="date" value={form.log_date} onChange={set('log_date')} max={today} />
+                <input className="input" type="date" value={form.log_date} onChange={e => handleFieldChange('log_date', e.target.value)} max={today} />
               </div>
 
-              <p style={{ fontSize: 13, color: 'var(--text-muted)', marginTop: -8 }}>All time points are optional — fill in whichever apply to your regimen.</p>
+              <p style={{ fontSize: 13, color: 'var(--text-muted)', marginTop: -4 }}>All time points are optional — fill in whichever apply to your regimen.</p>
 
-              {/* Fasting */}
-              <TimePointSection tpKey="fasting" label="🌅 Fasting (Pre-Breakfast)" color="var(--accent)"
-                rbsField="fasting_rbs" dosePrefix="fasting" missedKey="missed_am_dose" missedLabel="Missed fasting/breakfast dose" />
+              <TimePointSection label="🌅 Fasting (Pre-Breakfast)" color="var(--accent)"
+                rbsField="fasting_rbs" nField="fasting_n_dose" rField="fasting_r_dose"
+                basalField="fasting_basal" bolusField="fasting_bolus"
+                missedField="missed_am_dose" missedLabel="Missed fasting/breakfast dose"
+                form={form} onChange={handleFieldChange} onToggle={handleToggle} regimen={regimen} />
 
-              {/* AM */}
-              <TimePointSection tpKey="am" label="☀️ Morning (AM)" color="#60a5fa"
-                rbsField="am_rbs" dosePrefix="am" missedKey={null} />
+              <TimePointSection label="☀️ Morning (AM)" color="#60a5fa"
+                rbsField="am_rbs" nField="am_n_dose" rField="am_r_dose"
+                basalField="am_basal" bolusField="am_bolus"
+                missedField={null} missedLabel={null}
+                form={form} onChange={handleFieldChange} onToggle={handleToggle} regimen={regimen} />
 
-              {/* Pre-Lunch */}
-              <TimePointSection tpKey="pre_lunch" label="🕛 Pre-Lunch" color="var(--warning)"
-                rbsField="pre_lunch_rbs" dosePrefix="lunch" missedKey="missed_lunch_dose" missedLabel="Missed lunch dose" />
+              <TimePointSection label="🕛 Pre-Lunch" color="var(--warning)"
+                rbsField="pre_lunch_rbs" nField="lunch_n_dose" rField="lunch_r_dose"
+                basalField="lunch_basal" bolusField="lunch_bolus"
+                missedField="missed_lunch_dose" missedLabel="Missed lunch dose"
+                form={form} onChange={handleFieldChange} onToggle={handleToggle} regimen={regimen} />
 
-              {/* Pre-Dinner */}
-              <TimePointSection tpKey="pre_dinner" label="🌆 Pre-Dinner" color="#f97316"
-                rbsField="pre_dinner_rbs" dosePrefix="dinner" missedKey="missed_dinner_dose" missedLabel="Missed dinner dose" />
+              <TimePointSection label="🌆 Pre-Dinner" color="#f97316"
+                rbsField="pre_dinner_rbs" nField="dinner_n_dose" rField="dinner_r_dose"
+                basalField="dinner_basal" bolusField="dinner_bolus"
+                missedField="missed_dinner_dose" missedLabel="Missed dinner dose"
+                form={form} onChange={handleFieldChange} onToggle={handleToggle} regimen={regimen} />
 
-              {/* PM */}
-              <TimePointSection tpKey="pm" label="🌙 Evening (PM)" color="#a78bfa"
-                rbsField="pm_rbs" dosePrefix="pm" missedKey="missed_pm_dose" missedLabel="Missed evening dose" />
+              <TimePointSection label="🌙 Evening (PM)" color="#a78bfa"
+                rbsField="pm_rbs" nField="pm_n_dose" rField="pm_r_dose"
+                basalField="pm_basal" bolusField="pm_bolus"
+                missedField="missed_pm_dose" missedLabel="Missed evening dose"
+                form={form} onChange={handleFieldChange} onToggle={handleToggle} regimen={regimen} />
 
-              {/* Bedtime */}
-              <div style={{ border: '1px solid var(--border)', borderRadius: 10, padding: 16, background: 'var(--surface2)' }}>
-                <div style={{ fontSize: 13, fontWeight: 600, color: '#ec4899', textTransform: 'uppercase', letterSpacing: '0.05em', marginBottom: 12 }}>🌛 Bedtime</div>
-                <div className="grid-2" style={{ marginBottom: 12 }}>
-                  <div className="field">
-                    <label>RBS (mg/dL)</label>
-                    <input className="input" type="number" step="1" placeholder="e.g. 140" value={form.bedtime_rbs} onChange={set('bedtime_rbs')} />
-                  </div>
-                  <div />
-                </div>
-                <div className="grid-2" style={{ marginBottom: 10 }}>
-                  {isNPH && <div className="field"><label>N Dose (units)</label><input className="input" type="number" step="0.5" placeholder="Bedtime NPH" value={form.bedtime_n_dose} onChange={set('bedtime_n_dose')} /></div>}
-                  {(isBasalBolus || isPump) && <div className="field"><label>Basal (units)</label><input className="input" type="number" step="0.5" value={form.bedtime_basal} onChange={set('bedtime_basal')} /></div>}
-                  <div />
-                </div>
-                <label style={{ display: 'flex', alignItems: 'center', gap: 10, cursor: 'pointer', fontSize: 14, color: form.missed_bedtime_dose ? 'var(--warning)' : 'var(--text-muted)' }}>
-                  <input type="checkbox" checked={form.missed_bedtime_dose} onChange={toggle('missed_bedtime_dose')} style={{ width: 16, height: 16, accentColor: 'var(--warning)' }} />
-                  ⚠️ Missed bedtime dose
-                </label>
-              </div>
+              <TimePointSection label="🌛 Bedtime" color="#ec4899"
+                rbsField="bedtime_rbs" nField="bedtime_n_dose" rField={null}
+                basalField="bedtime_basal" bolusField={null}
+                missedField="missed_bedtime_dose" missedLabel="Missed bedtime dose"
+                form={form} onChange={handleFieldChange} onToggle={handleToggle} regimen={regimen} />
 
               <hr className="divider" style={{ margin: 0 }} />
 
-              {/* Exercise */}
               <div className="field">
                 <label>🏃 Exercise Today</label>
-                <input className="input" placeholder="e.g. 30 min walk, football, swimming…" value={form.exercise_notes} onChange={set('exercise_notes')} />
+                <input className="input" type="text" placeholder="e.g. 30 min walk, football, swimming…"
+                  value={form.exercise_notes} onChange={e => handleFieldChange('exercise_notes', e.target.value)} />
               </div>
 
-              {/* Hypo symptoms */}
               <div className="field">
                 <label>⚡ Hypoglycaemia Symptoms</label>
                 <div style={{ display: 'flex', flexWrap: 'wrap', gap: 8, marginTop: 4 }}>
@@ -362,17 +372,15 @@ export default function PatientDashboard() {
                       background: form.hypo_symptoms.includes(s) ? 'rgba(248,113,113,0.15)' : 'var(--surface2)',
                       color: form.hypo_symptoms.includes(s) ? 'var(--danger)' : 'var(--text-muted)',
                       fontSize: 13, cursor: 'pointer', fontFamily: 'var(--font)', transition: 'all 0.15s'
-                    }}>
-                      {s}
-                    </button>
+                    }}>{s}</button>
                   ))}
                 </div>
               </div>
 
-              {/* General notes */}
               <div className="field">
                 <label>Notes (optional)</label>
-                <textarea className="input" rows={2} placeholder="e.g. felt unwell, sick day, special occasion meal…" value={form.notes} onChange={set('notes')} style={{ resize: 'vertical' }} />
+                <textarea className="input" rows={2} placeholder="e.g. felt unwell, sick day…"
+                  value={form.notes} onChange={e => handleFieldChange('notes', e.target.value)} style={{ resize: 'vertical' }} />
               </div>
 
               <button className="btn btn-primary" type="submit" disabled={saving} style={{ alignSelf: 'flex-start', minWidth: 160, justifyContent: 'center' }}>
@@ -405,21 +413,17 @@ export default function PatientDashboard() {
                   </thead>
                   <tbody>
                     {logs.map(log => {
-                      const fields = [
-                        { val: log.fasting_rbs }, { val: log.am_rbs },
-                        { val: log.pre_lunch_rbs }, { val: log.pre_dinner_rbs },
-                        { val: log.pm_rbs }, { val: log.bedtime_rbs }
-                      ]
+                      const fields = [log.fasting_rbs, log.am_rbs, log.pre_lunch_rbs, log.pre_dinner_rbs, log.pm_rbs, log.bedtime_rbs]
                       return (
                         <tr key={log.id}>
                           <td style={{ fontFamily: 'var(--font-mono)', fontSize: 13 }}>{format(parseISO(log.log_date), 'dd MMM yyyy')}</td>
-                          {fields.map((f, i) => {
-                            const s = rbsStatus(f.val)
+                          {fields.map((val, i) => {
+                            const s = rbsStatus(val)
                             return (
                               <td key={i}>
-                                {f.val ? (
+                                {val ? (
                                   <div style={{ display: 'flex', alignItems: 'center', gap: 6 }}>
-                                    <span style={{ fontFamily: 'var(--font-mono)', fontSize: 13 }}>{f.val}</span>
+                                    <span style={{ fontFamily: 'var(--font-mono)', fontSize: 13 }}>{val}</span>
                                     {s && <span className={`badge ${s.cls}`} style={{ fontSize: 10, padding: '1px 6px' }}>{s.label}</span>}
                                   </div>
                                 ) : <span style={{ color: 'var(--text-dim)' }}>—</span>}
