@@ -206,7 +206,7 @@ export default function PatientDashboard() {
         <div className="grid-2" style={{ marginBottom: 12 }}>
           <div className="field">
             <label>RBS (mg/dL)</label>
-            <input className="input" type="number" step="1" placeholder="e.g. 120" value={form[rbsField]} onChange={set(rbsField)} />
+            <input className="input" type="text" inputMode="numeric" pattern="[0-9]*" placeholder="e.g. 120" value={form[rbsField]} onChange={set(rbsField)} />
           </div>
           <div />
         </div>
