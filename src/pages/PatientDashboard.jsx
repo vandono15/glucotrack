@@ -93,7 +93,12 @@ export default function PatientDashboard() {
     setLoading(false)
   }
 
-  function set(field) { return e => setForm(f => ({ ...f, [field]: e.target.value })) }
+  function set(field) {
+  return e => {
+    const val = e.target.value
+    setForm(f => ({ ...f, [field]: val }))
+  }
+}
   function toggle(field) { return () => setForm(f => ({ ...f, [field]: !f[field] })) }
   function toggleHypo(symptom) {
     setForm(f => ({
